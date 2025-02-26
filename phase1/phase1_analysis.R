@@ -1,13 +1,17 @@
 ### Phase 1 Analysis for TBI VMT
 
 # Set Working Directory ---------------------------------------------------
-setwd("D:/neeco/tbi_vmt/phase1/")
+setwd("D:/neeco/thesis/tbi_vmt/phase1/")
 
 # Load Packages -----------------------------------------------------------
 library(tidyverse)
 library(data.table)
 library(spatstat)
 options(scipen = 999)
+
+
+# Globals -----------------------------------------------------------------
+twork_limit <- 2.5
 
 # Read in Data ------------------------------------------------------------
 person_wave1 <- read.csv("../inputs/person_wave1_v1.csv")
@@ -28,7 +32,7 @@ trip_wave2 <- read.csv("../inputs/trip_wave2_v1.csv")
 
 tbi_cleaned_read <- fread("../inputs/tbi_cleaned.csv")
 tbi_cleaned <- tbi_cleaned_read %>%
-  select(hh_id, wave, person_id, day_num, travel_dow, vmt, person_weight, trip_weight, hh_weight, day_weight, income_broad, o_purpose, d_purpose)
+  select(hh_id, wave, person_id, day_num, travel_dow, vmt, person_weight, trip_weight, hh_weight, day_weight, income_broad, o_purpose, d_purpose, d_purpose_category)
 tbi_cleaned$person_id <- as.numeric(tbi_cleaned$person_id)
 
 # Get a dataset of FTIP, Hybrid, and FTR -------------------------------------
@@ -88,9 +92,9 @@ trip_w1_step5 <- trip_w1_step3 %>%
 
 ### Finally, join both dataframes and use logic to get FTIP, Hybrid, and FTR
 work_arr_w1 <- inner_join(trip_w1_step4, trip_w1_step5) %>%
-  mutate(work_arr = case_when(telework_time <= 3.5 ~ "ftip",
-                              telework_time > 3.5 & office_days > 0  ~ "hybrid",
-                              telework_time > 3.5 & office_days == 0  ~ "ftr"),
+  mutate(work_arr = case_when(telework_time <= twork_limit ~ "ftip",
+                              telework_time > twork_limit & office_days > 0  ~ "hybrid",
+                              telework_time > twork_limit & office_days == 0  ~ "ftr"),
          wave = 1)
 
 ## Wave 2 --------------------------------------------------------------------
@@ -133,9 +137,9 @@ trip_w2_step5 <- trip_w2_step3 %>%
 
 ### Finally, join both dataframes and use logic to get FTIP, Hybrid, and FTR
 work_arr_w2 <- inner_join(trip_w2_step4, trip_w2_step5) %>%
-  mutate(work_arr = case_when(telework_time <= 3.5 ~ "ftip", # If less than 4 hours of telework, FTIP
-                              telework_time > 3.5 & office_days > 0  ~ "hybrid",
-                              telework_time > 3.5 & office_days == 0  ~ "ftr"),
+  mutate(work_arr = case_when(telework_time <= twork_limit ~ "ftip", # If less than 2.5 hours of telework, FTIP
+                              telework_time > twork_limit & office_days > 0  ~ "hybrid",
+                              telework_time > twork_limit & office_days == 0  ~ "ftr"),
          wave = 2)
 
 ## Merge two datasets together -----------------------------------------------
@@ -172,6 +176,13 @@ test_person2 <- trip_wave1 %>%
   inner_join(person_wave1, "person_id") %>%
   select(person_id, trip_num, travel_dow, depart_time, arrive_time, o_purpose_imputed, d_purpose, mode_type, job_type, employment_status, student_status)
 
+
+test_person3 <- trip_wave1 %>%
+  filter(person_id == 1912963001) %>%
+  select(person_id, trip_num, travel_dow, depart_time, arrive_time, o_purpose_imputed, d_purpose, mode_type) %>%
+  inner_join(person_wave1, "person_id") %>%
+  select(person_id, trip_num, travel_dow, depart_time, arrive_time, o_purpose_imputed, d_purpose, mode_type, job_type, employment_status, student_status)
+
 # Weekly Weighted VMT ---------------------------------------------------------
 ## Combine Work Arrangement data with TBI Cleaned Data
 vmt_by_work_arr <- work_arr %>%
@@ -194,7 +205,7 @@ vmt_weekly %>%
   summarize(mean_weekly_vmt = mean(weekly_vmt, na.rm = T),
             median_weekly_vmt = median(weekly_vmt, person_weight, na.rm = T))
 
-## Percentage of FTIP, Hybrid, and FTR --------------------------------------
+# Percentage of FTIP, Hybrid, and FTR --------------------------------------
 work_arr_pct_w <- work_arr %>%
   left_join(tbi_cleaned, c("person_id", "wave")) %>%
   select(person_id, work_arr, wave, person_weight) %>%
@@ -215,7 +226,7 @@ work_arr_pct_u <- work_arr %>%
          percent = group_sum / group_total) %>%
   select(work_arr, wave, percent)
 
-## Mean Commute VMT by Work Arrangement -------------------------------------
+# Mean Commute VMT by Work Arrangement -------------------------------------
 commuting_vmt <- tbi_cleaned %>%
   filter(o_purpose == "Went home" & d_purpose == "Primary workplace")
 
@@ -228,7 +239,7 @@ weighted_commute_vmt <- commuting_vmt %>%
   group_by(work_arr, wave) %>%
   summarize(mean_commute_dist = weighted.mean(vmt, person_weight))
 
-## VMT by TOD -------------------------------------------------------------
+# VMT by TOD -------------------------------------------------------------
 tbi_tod <-  tbi_cleaned_read %>%
   select(hh_id, wave, person_id, day_num, travel_dow, vmt, person_weight, trip_weight, hh_weight, day_weight, income_broad, o_purpose, d_purpose, depart_time, arrive_time)
 tbi_tod$person_id <- as.numeric(tbi_cleaned$person_id)
@@ -252,7 +263,33 @@ vmt_by_tod <- work_arr %>%
   summarize(mean_vmt = mean(vmt, na.rm = T),
             median_vmt = median(vmt, na.rm = T))
 
-## When do hybrid workers go to work? ------------------------------------------
+# Work Arrangements by Employment Status --------------------------------------
+emp_status_w1 <- person_wave1 %>%
+  select(person_id, employment_status, person_weight) %>%
+  mutate(wave = 1)
+
+emp_status_w2 <- person_wave2 %>%
+  select(person_id, employment_status, person_weight) %>%
+  mutate(wave = 2)
+
+emp_status <- rbind(emp_status_w1, emp_status_w2)
+
+work_arr_emp_status_u <- work_arr %>%
+  left_join(emp_status, c("person_id", "wave")) %>%
+  select("work_arr", "person_weight", "wave", "employment_status") %>%
+  group_by(wave, work_arr, employment_status) %>%
+  summarize(count = n()) %>%
+  mutate(percentage = (count / sum(count))) 
+
+work_arr_emp_status_w <- work_arr %>%
+  left_join(emp_status, c("person_id", "wave")) %>%
+  group_by(wave, work_arr, employment_status) %>%
+  summarize(group_sum = sum(person_weight, na.rm = T)) %>%
+  mutate(group_total = sum(group_sum),
+         percent = group_sum / group_total)
+  
+
+# When do hybrid workers go to work? ------------------------------------------
 hybrid_workers <- work_arr %>%
   filter(work_arr == "hybrid")
 
@@ -277,7 +314,7 @@ test_person2 <- tbi_cleaned_read %>%
   filter(person_id == 1831068801) %>%
   select(person_id, travel_dow, o_purpose, d_purpose, mode, vmt)
 
-## Work Arrangement by Income --------------------------------------------------
+# Work Arrangement by Income --------------------------------------------------
 income_work_arr <- work_arr %>%
   inner_join(tbi_cleaned) %>%
   select(person_id, person_weight, income_broad, wave, work_arr) %>%
@@ -298,6 +335,31 @@ income_work_arr <- income_work_arr %>%
   mutate(group_total = sum(group_sum),
          percent = group_sum / group_total) %>%
   select(work_arr, wave, income_broad, percent)
+
+
+# VMT by Work Arrangement and Purpose -------------------------------------
+work_arr_purpose_w <- work_arr %>%
+  left_join(tbi_cleaned, c("person_id", "wave")) %>%
+  select(person_id, work_arr, trip_weight, vmt, d_purpose_category, wave) %>%
+  filter(!d_purpose_category %in% c("Home", "Not imputable", "Missing: Non-response")) %>%
+  group_by(work_arr, wave, d_purpose_category) %>%
+  summarize(vmt_times_trip_weight = vmt*trip_weight,
+            sum_trip_weights = sum(trip_weight, na.rm = T)) %>%
+  mutate(vmt_per_capita = (vmt_times_trip_weight)/sum_trip_weights) %>%
+  ungroup() %>%
+  group_by(work_arr, wave, d_purpose_category) %>%
+  summarize(vmt_per_capita = sum(vmt_per_capita))
+
+work_arr_purpose_u <- work_arr %>%
+  left_join(tbi_cleaned, c("person_id", "wave")) %>%
+  select(person_id, work_arr, trip_weight, vmt, d_purpose_category, wave) %>%
+  filter(!d_purpose_category %in% c("Home", "Not imputable", "Missing: Non-response")) %>%
+  group_by(work_arr, wave) %>%
+  mutate(count = n_distinct(person_id)) %>%
+  ungroup() %>%
+  group_by(work_arr, wave, d_purpose_category, count) %>%
+  summarize(vmt = sum(vmt, na.rm = T)) %>%
+  mutate(vmt_per_capita = vmt/count)
 
 # Plotting ----------------------------------------------------------------
 ## VMT Distribution by Arrangement and Wave -------------------------------
@@ -439,6 +501,93 @@ for(i in c("Wave 1", "Wave 2")){
 }
 
 ## Employment Status and Work Arrangement ---------------------------------
+### Weighted -------------------
+plot_work_arr_emp_status_w <- work_arr_emp_status_w %>%
+  mutate(wave = case_when(wave == 1 ~ "Wave 1",
+                          wave == 2 ~ "Wave 2"),
+         work_arr = case_when(work_arr == "ftip" ~ "Full-Time In-Person",
+                              work_arr == "hybrid" ~ "Hybrid",
+                              work_arr == "ftr" ~ "Full-Time Remote"),
+         employment_status = case_when(employment_status == 1 ~ "Full-Time",
+                                       employment_status == 2 ~ "Part-Time",
+                                       employment_status == 3 ~ "Self-Employed"))
+
+
+plot_work_arr_emp_status_w$work_arr <- factor(plot_work_arr_emp_status_w$work_arr, c("Full-Time In-Person", "Hybrid", "Full-Time Remote"))
+
+
+for(i in c("Wave 1", "Wave 2")){
+  print(plot_work_arr_emp_status_w %>% filter(wave == i) %>% ggplot(aes(fill = employment_status, x = work_arr, y = percent)) +
+    geom_bar(position="dodge", stat="identity") + ggtitle(paste0("Work Arrangement by Employment Status (", i, ", Weighted)")) +
+    xlab("Work Arrangement") + ylab("Percent") + guides(fill=guide_legend(title="")) + theme(legend.position="bottom") +
+    geom_text(aes(label = round(percent, 2)), size = 3, vjust = -0.25, position = position_dodge(.9)) +
+    ylim(0, 1))
+}
+
+### Unweighted ---------------------
+plot_work_arr_emp_status_u <- work_arr_emp_status_u %>%
+  mutate(wave = case_when(wave == 1 ~ "Wave 1",
+                          wave == 2 ~ "Wave 2"),
+         work_arr = case_when(work_arr == "ftip" ~ "Full-Time In-Person",
+                              work_arr == "hybrid" ~ "Hybrid",
+                              work_arr == "ftr" ~ "Full-Time Remote"),
+         employment_status = case_when(employment_status == 1 ~ "Full-Time",
+                                       employment_status == 2 ~ "Part-Time",
+                                       employment_status == 3 ~ "Self-Employed"))
+
+
+plot_work_arr_emp_status_u$work_arr <- factor(plot_work_arr_emp_status_u$work_arr, c("Full-Time In-Person", "Hybrid", "Full-Time Remote"))
+
+
+for(i in c("Wave 1", "Wave 2")){
+  print(plot_work_arr_emp_status_u %>% filter(wave == i) %>% ggplot(aes(fill = employment_status, x = work_arr, y = percentage)) +
+          geom_bar(position="dodge", stat="identity") + ggtitle(paste0("Work Arrangement by Employment Status (", i, ", Unweighted)")) +
+          xlab("Work Arrangement") + ylab("Percent") + guides(fill=guide_legend(title="")) + theme(legend.position="bottom") +
+          geom_text(aes(label = round(percentage, 2)), size = 3, vjust = -0.25, position = position_dodge(.9)) +
+          ylim(0, 1))
+}
+
+## VMT by Purpose -----------------------------------------------------------
+# plot_work_arr_purpose_w <- work_arr_purpose_w  %>%
+#   mutate(wave = case_when(wave == 1 ~ "Wave 1",
+#                           wave == 2 ~ "Wave 2"),
+#          work_arr = case_when(work_arr == "ftip" ~ "Full-Time In-Person",
+#                               work_arr == "hybrid" ~ "Hybrid",
+#                               work_arr == "ftr" ~ "Full-Time Remote"))
+# 
+# 
+# plot_work_arr_purpose_w$work_arr <- factor(plot_work_arr_purpose_w$work_arr, c("Full-Time In-Person", "Hybrid", "Full-Time Remote"))
+# 
+# plot_work_arr_purpose_w <- plot_work_arr_purpose_w[complete.cases(plot_work_arr_purpose_w), ]
+# 
+# for(i in c("Wave 1", "Wave 2")){
+#   print(plot_work_arr_purpose_w  %>% filter(wave == i) %>% ggplot(aes(fill = d_purpose_category, x = work_arr, y = vmt_per_capita)) +
+#           geom_bar(position="dodge", stat="identity") + ggtitle(paste0("VMT by Purpose and Work Arrangement (", i, ", Weighted)")) +
+#           xlab("Work Arrangement") + ylab("VMT") + guides(fill="none") + 
+#           geom_text(aes(label = paste0(d_purpose_category, " (", round(vmt_per_capita, 1), ")")), size = 2.5, vjust = -0.25, angle = 90, hjust = -0.05, position = position_dodge(0.9)) +
+#           ylim(0, 33))
+# }
+
+
+plot_work_arr_purpose_u <- work_arr_purpose_u  %>%
+  mutate(wave = case_when(wave == 1 ~ "Wave 1",
+                          wave == 2 ~ "Wave 2"),
+         work_arr = case_when(work_arr == "ftip" ~ "Full-Time In-Person",
+                              work_arr == "hybrid" ~ "Hybrid",
+                              work_arr == "ftr" ~ "Full-Time Remote"))
+
+
+plot_work_arr_purpose_u$work_arr <- factor(plot_work_arr_purpose_u$work_arr, c("Full-Time In-Person", "Hybrid", "Full-Time Remote"))
+
+plot_work_arr_purpose_u <- plot_work_arr_purpose_u[complete.cases(plot_work_arr_purpose_u), ]
+
+for(i in c("Wave 1", "Wave 2")){
+  print(plot_work_arr_purpose_u  %>% filter(wave == i) %>% ggplot(aes(fill = d_purpose_category, x = work_arr, y = vmt_per_capita)) +
+          geom_bar(position="dodge", stat="identity") + ggtitle(paste0("VMT by Purpose and Work Arrangement (", i, ", Unweighted)")) +
+          xlab("Work Arrangement") + ylab("VMT") + guides(fill="none") + 
+          geom_text(aes(label = paste0(d_purpose_category, " (", round(vmt_per_capita, 1), ")")), size = 2.5, vjust = -0.25, angle = 90, hjust = -0.05, position = position_dodge(0.9)) +
+          ylim(0, 33))
+}
 
 ## Look at person/job type. Explore this more. How many work more than one job, full time vs part time, etc.
 ## Also look at day/telework time. Wave 1 in hours.
@@ -449,4 +598,10 @@ for(i in c("Wave 1", "Wave 2")){
 ## Organize around hypotheses of what matters. 
 
 ## VMT segmented by purpose.
+
+### Add in data consistency checks. Example, if work arrangement is FTIP and lots of telework time. Drop it?
+
+### Another definition: count the number of strictly telework days, strictly office days, both, and neither.
+
+### DOW by work.
 
