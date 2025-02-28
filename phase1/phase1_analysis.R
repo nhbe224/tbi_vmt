@@ -11,185 +11,97 @@ options(scipen = 999)
 
 
 # Globals -----------------------------------------------------------------
-twork_limit <- 2.5
+twork_limit_weekly <- 2.5
+twork_limit_daily <- 1
 
 # Read in Data ------------------------------------------------------------
-person_wave1 <- read.csv("../inputs/person_wave1_v1.csv")
-person_wave2 <- read.csv("../inputs/person_wave2_v1.csv")
-
-day_wave1 <- read.csv("../inputs/day_wave1_v1.csv")
-day_wave2 <- read.csv("../inputs/day_wave2_v1.csv")
-
-hh_wave2 <- read.csv("../inputs/hh_wave2_v1.csv")
-hh_wave2 <- hh_wave2 %>%
-  select(hh_id, participation_group)
-
-trip_wave1 <- read.csv("../inputs/trip_wave1_v1.csv", quote = "")
-trip_wave1 <- trip_wave1 %>%
-  filter(person_id > 10000)
-trip_wave1$distance <- as.numeric(trip_wave1$distance)
-trip_wave2 <- read.csv("../inputs/trip_wave2_v1.csv")
-
-tbi_cleaned_read <- fread("../inputs/tbi_cleaned.csv")
-tbi_cleaned <- tbi_cleaned_read %>%
-  select(hh_id, wave, person_id, day_num, travel_dow, vmt, person_weight, trip_weight, hh_weight, day_weight, income_broad, o_purpose, d_purpose, d_purpose_category)
-tbi_cleaned$person_id <- as.numeric(tbi_cleaned$person_id)
+source("../datacleaning/getvmt.R")
 
 # Get a dataset of FTIP, Hybrid, and FTR -------------------------------------
 ## Filter for those with 7 days of travel data and in rMove ------------------
-trip_w1_complete <- trip_wave1 %>%
+trip_complete <- linkedtrip_all %>%
   group_by(person_id) %>% 
-  filter(n_distinct(travel_dow) == 7) %>%
-  ungroup() %>%
-  arrange(person_id, travel_dow) %>% 
-  filter(participation_group %in% c(1, 3)) ## People with rMove Diary
-
-trip_w2_complete <- trip_wave2 %>%
-  inner_join(hh_wave2, "hh_id") %>% ## This gets us participation group
-  group_by(person_id) %>% 
-  filter(n_distinct(travel_dow) == 7) %>%
-  ungroup() %>%
-  arrange(person_id, travel_dow) %>%
-  filter(participation_group %in% c(1, 3, 4, 6, 7, 9)) ## People with rMove Diary
+  filter(n_distinct(day_num) == 7) %>%
+  left_join(person_all) %>%
+  arrange(person_id) %>% 
+  select(hh_id, person_id, survey_year, linked_trip_id, o_purpose, d_purpose, mode_type, participate, day_num,participation_group) %>%
+  filter(participation_group %in% c("rMove recruit, rMove diary", "Online or call center recruit, rMove diary") |
+         participate == "Yes")## People with rMove Diary
 
 ## Join with person_id to get their job type ---------------------------------
-## Wave 1 --------------------------------------------------------------------
-trip_w1_step1 <- trip_w1_complete %>%
-  select(-participation_group, -person_num, -hh_id) %>%
-  inner_join(person_wave1, c("person_id")) %>%
-  filter(job_type %in% c(1, 2, 3), # Either primary workplace, different worksites, or only telework. 
-         employment_status %in% c(1, 2, 3), # FTIP, PT, or Self Employed
-         student_status == 0) # No students
+trip_step1 <- trip_complete %>%
+  left_join(person_all) %>%
+  filter(job_type %in% c("Go to one work location ONLY (outside of home)", "Work location regularly varies (different offices/jobsites)", "Work ONLY from home or remotely (telework, self-employed)"),
+         employment %in% c("Employed full-time" , "Employed part-time", "Self-employed"),
+         student %in% c("Not a student")) # No students
 
-telework_days <- day_wave1 %>%
-  select(person_id, travel_dow, telework_time)
+telework_days <- day_all %>%
+  select(person_id, day_num, telework_time, survey_year) %>%
+  replace(is.na(.), 0)
 
-trip_w1_step2 <- trip_w1_step1 %>%
-  inner_join(telework_days, c("person_id", "travel_dow"))
+### Fix telework time to be in hours for 2021 and 2023
+telework_days$telework_time <- ifelse(telework_days$survey_year != 2019, telework_days$telework_time / 60, telework_days$telework_time)
 
-
-## For those with complete travel surveys, flag if they have a work trip on a given day.
-trip_w1_step3 <- trip_w1_step2 %>%
-  select(person_id, travel_dow, o_purpose_imputed, d_purpose, telework_time) %>%
-  group_by(person_id, travel_dow) %>%
-  mutate(work_trip_made = +(any(d_purpose %in% c(10, 11, 14)))) %>%
-  ungroup %>%
-  select(person_id, travel_dow, telework_time, work_trip_made)
-
-### Get the telework hours for each person.
-trip_w1_step4 <- trip_w1_step3 %>%
-  select(person_id, travel_dow, telework_time) %>%
-  distinct() %>%
-  group_by(person_id) %>%
-  summarize(telework_time = sum(telework_time, na.rm = T))
-
-### Get the number of work trips for each person
-trip_w1_step5 <- trip_w1_step3 %>%
-  select(person_id, travel_dow, work_trip_made) %>%
-  distinct() %>%
-  group_by(person_id) %>%
-  summarize(office_days = sum(work_trip_made, na.rm = T))
-
-### Finally, join both dataframes and use logic to get FTIP, Hybrid, and FTR
-work_arr_w1 <- inner_join(trip_w1_step4, trip_w1_step5) %>%
-  mutate(work_arr = case_when(telework_time <= twork_limit ~ "ftip",
-                              telework_time > twork_limit & office_days > 0  ~ "hybrid",
-                              telework_time > twork_limit & office_days == 0  ~ "ftr"),
-         wave = 1)
-
-## Wave 2 --------------------------------------------------------------------
-trip_w2_step1 <- trip_w2_complete %>%
-  select(-participation_group, -person_num, -hh_id) %>%
-  inner_join(person_wave2, c("person_id")) %>%
-  filter(job_type %in% c(1, 2, 3, 5), # Either primary workplace, different worksites, or only telework. 
-         employment_status %in% c(1, 2, 3), # FTIP, PT, or Self Employed
-         student_status == 1) # No students
-
-telework_days <- day_wave2 %>%
-  select(person_id, travel_dow, telework_time)
-
-trip_w2_step2 <- trip_w2_step1 %>%
-  inner_join(telework_days, c("person_id", "travel_dow"))
+trip_step2 <- trip_step1 %>%
+  inner_join(telework_days, c("person_id", "day_num", "survey_year"))
 
 
 ## For those with complete travel surveys, flag if they have a work trip on a given day.
-trip_w2_step3 <- trip_w2_step2 %>%
-  select(person_id, travel_dow, o_purpose, d_purpose, telework_time) %>%
-  group_by(person_id, travel_dow) %>%
-  mutate(work_trip_made = +(any(d_purpose %in% c(10, 11, 14)))) %>%
+trip_step3 <- trip_step2 %>%
+  select(person_id, survey_year, day_num, o_purpose, d_purpose, telework_time) %>%
+  group_by(person_id, day_num) %>%
+  mutate(work_trip_made = +(any(d_purpose %in% c("Primary workplace", "Went to work-related activity (e.g., meeting, delivery, worksite)", "Other work-related")))) %>%
   ungroup %>%
-  select(person_id, travel_dow, telework_time, work_trip_made) %>%
-  mutate(telework_time = telework_time /60) # Convert telework time to hours.
+  select(person_id, survey_year, day_num, telework_time, work_trip_made) %>%
+  distinct()
 
-### Get the telework hours for each person.
-trip_w2_step4 <- trip_w2_step3 %>%
-  select(person_id, travel_dow, telework_time) %>%
-  distinct() %>%
-  group_by(person_id) %>%
-  summarize(telework_time = sum(telework_time, na.rm = T))
+## Convert Day Number to numeric
+trip_step3$day_num <- as.numeric(str_remove(trip_step3$day_num, "Day "))
 
-### Get the number of work trips for each person
-trip_w2_step5 <- trip_w2_step3 %>%
-  select(person_id, travel_dow, work_trip_made) %>%
-  distinct() %>%
-  group_by(person_id) %>%
-  summarize(office_days = sum(work_trip_made, na.rm = T))
+work_arr <- trip_step3 %>%
+  arrange(survey_year, person_id, day_num) %>%
+  mutate(work_arr_day = case_when(telework_time <= twork_limit_daily & work_trip_made == 1 ~ "in_person_day",
+                              telework_time > twork_limit_daily & work_trip_made == 1  ~ "hybrid_day",
+                              telework_time > twork_limit_daily & work_trip_made == 0  ~ "remote_day",
+                              telework_time <= twork_limit_daily & work_trip_made == 0 ~ "no_work_day")) %>% ## Part 1
+  select(person_id, survey_year, work_arr_day) %>%
+  group_by(person_id, survey_year, work_arr_day) %>%
+  summarize(count = n()) %>%
+  pivot_wider(names_from = work_arr_day, values_from = count) %>% 
+  replace(is.na(.), 0) %>% ## Part 2
+  filter(no_work_day != 7) %>%
+  mutate(total_work_days = 7 - no_work_day,
+         in_person_pct = in_person_day / total_work_days,
+         remote_pct = remote_day / total_work_days,
+         hybrid_pct = hybrid_day / total_work_days,
+         work_arr = case_when(in_person_pct >= 0.8 ~ "ftip",
+                              in_person_pct > 0.05 & in_person_pct < 0.8  ~ "hybrid",
+                              in_person_pct <= 0.05 ~ "ftr")) %>%
+  select(person_id, survey_year, work_arr)
 
-### Finally, join both dataframes and use logic to get FTIP, Hybrid, and FTR
-work_arr_w2 <- inner_join(trip_w2_step4, trip_w2_step5) %>%
-  mutate(work_arr = case_when(telework_time <= twork_limit ~ "ftip", # If less than 2.5 hours of telework, FTIP
-                              telework_time > twork_limit & office_days > 0  ~ "hybrid",
-                              telework_time > twork_limit & office_days == 0  ~ "ftr"),
-         wave = 2)
+## Join with telework hours per week to get a sense of who's reporting a lot of telework.
+telework_hours_per_week <- day_all %>%
+  select(person_id, telework_time, survey_year) %>%
+  replace(is.na(.), 0)
 
-## Merge two datasets together -----------------------------------------------
-work_arr <- rbind(work_arr_w1, work_arr_w2)
+## Convert 2021 and 2023 to hours.
+telework_hours_per_week$telework_time <- ifelse(telework_hours_per_week$survey_year != 2019, 
+                                                telework_hours_per_week$telework_time / 60, telework_hours_per_week$telework_time)
 
-## Test People ---------------------------------------------------------------
-teleworker <- trip_wave1 %>%
-  filter(person_id == 1984370301) %>%
-  select(person_id, trip_num, travel_dow, depart_time, arrive_time, o_purpose_imputed, d_purpose, mode_type)
+telework_hours_per_week <- telework_hours_per_week %>%
+  group_by(person_id, survey_year) %>%
+  summarize(telework_hours = sum(telework_time, na.rm = T))
 
-test_person <- trip_wave1 %>%
-  filter(person_id == 1984766802) %>%
-  select(person_id, trip_num, travel_dow, depart_time, arrive_time, o_purpose_imputed, d_purpose, mode_type)
-
-## Overemployed?
-overemployed_trip <- trip_wave1 %>%
-  filter(person_id == 1817985001) %>%
-  select(person_id, trip_num, travel_dow, depart_time, arrive_time, o_purpose_imputed, d_purpose, mode_type)
-
-overemployed_day <- day_wave1 %>%
-  filter(person_id == 1817985001)
-
-overemployed_trip <- trip_wave2 %>%
-  filter(person_id == 2107173301) %>%
-  select(person_id, trip_num, travel_dow, depart_time, arrive_time, o_purpose, d_purpose, mode_type)
-
-overemployed_day <- day_wave2 %>%
-  filter(person_id == 2107173301)
-
-## Who is this?
-test_person2 <- trip_wave1 %>%
-  filter(person_id == 1815845202) %>%
-  select(person_id, trip_num, travel_dow, depart_time, arrive_time, o_purpose_imputed, d_purpose, mode_type) %>%
-  inner_join(person_wave1, "person_id") %>%
-  select(person_id, trip_num, travel_dow, depart_time, arrive_time, o_purpose_imputed, d_purpose, mode_type, job_type, employment_status, student_status)
-
-
-test_person3 <- trip_wave1 %>%
-  filter(person_id == 1912963001) %>%
-  select(person_id, trip_num, travel_dow, depart_time, arrive_time, o_purpose_imputed, d_purpose, mode_type) %>%
-  inner_join(person_wave1, "person_id") %>%
-  select(person_id, trip_num, travel_dow, depart_time, arrive_time, o_purpose_imputed, d_purpose, mode_type, job_type, employment_status, student_status)
+work_arr <- work_arr %>%
+  left_join(telework_hours_per_week)
 
 # Weekly Weighted VMT ---------------------------------------------------------
 ## Combine Work Arrangement data with TBI Cleaned Data
 vmt_by_work_arr <- work_arr %>%
-  left_join(tbi_cleaned, c("person_id", "wave"))
+  left_join(vmt_df, c("person_id", "survey_year"))
 
 vmt_weekly <- vmt_by_work_arr %>%
-  group_by(person_id, work_arr, person_weight, wave) %>%
+  group_by(person_id, work_arr, person_weight, survey_year) %>%
   summarize(weekly_vmt = sum(vmt))
 
 ## Weekly VMT by Work Arrangement (weighted by person)
