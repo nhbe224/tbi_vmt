@@ -147,7 +147,7 @@ linkedtrip_combined <- linkedtrip_combined %>%
 
 print(paste0('Trips after exclusions: ', nrow(linkedtrip_combined), ", VMT after exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
 
-## Finally, remove trips that are too long or too short
+## Remove trips that are too long or too short
 print(paste0('Trips before exclusions: ', nrow(linkedtrip_combined), ", VMT before exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
 
 linkedtrip_combined <- linkedtrip_combined %>%
@@ -155,10 +155,18 @@ linkedtrip_combined <- linkedtrip_combined %>%
 
 print(paste0('Trips after exclusions: ', nrow(linkedtrip_combined), ", VMT after exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
 
+## Keep people with 7 days worth of travel data
+print(paste0('Trips before exclusions: ', nrow(linkedtrip_combined), ", VMT before exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
+
+linkedtrip_combined <- linkedtrip_combined %>% group_by(person_id) %>% 
+  filter(n_distinct(day_num) == 7)
+
+print(paste0('Trips after exclusions: ', nrow(linkedtrip_combined), ", VMT after exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
 
 # Write out data to CSV ---------------------------------------------------
 linkedtrip_combined <- linkedtrip_combined %>%
-  select(survey_year, person_id, hh_id, day_id, day_num, linked_trip_id, travel_dow, depart_time, arrive_time, vmt)
+  select(survey_year, person_id, hh_id, day_id, day_num, linked_trip_id, travel_dow, depart_time, arrive_time, 
+         vmt, linked_trip_weight, person_weight, o_purpose, d_purpose, d_purpose_category, depart_hour, arrive_hour)
 
 vmt_df <- linkedtrip_combined
 rm(linkedtrip_combined)
