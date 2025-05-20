@@ -4,11 +4,11 @@
 setwd("D:/neeco/thesis/tbi_vmt/datacleaning")
 
 # Load Packages -----------------------------------------------------------
-library(tidyverse)
-library(data.table)
-library(spatstat)
+packages_vector <- c("tidyverse", "sf", "tigris", "tidycensus", "data.table", "janitor", "tools", "spatstat")
+need_to_install <- packages_vector[!(packages_vector %in% installed.packages()[,"Package"])]
+if (length(need_to_install)) install.packages(need_to_install)
+lapply(packages_vector, library, character.only = TRUE)
 options(scipen = 999)
-
 
 # Load in Data ------------------------------------------------------------
 ## Person Data ------------------------------------------------------------
@@ -23,6 +23,10 @@ print(paste0(sum(colnames(person_2023) != colnames(person_2021)), " column names
 # Since no column names are different, stack them up.
 person_all <- rbind(person_2019, person_2021, person_2023)
 rm(person_2019, person_2021, person_2023)
+
+# Drop kids and people who can't drive
+person_all <- person_all %>%
+  filter((age != "Under 5") & (age != "5 to 15") & (can_drive != "No, does not drive"))
 
 ## Trip Data --------------------------------------------------------------
 linkedtrip_2019 <- fread("../inputs/wave1_v2/travelBehaviorInventory2019LinkedTrip.csv")
@@ -85,9 +89,9 @@ names(linkedtrip_combined) <- gsub("\\.x", "", names(linkedtrip_combined))
 which(duplicated(names(linkedtrip_combined)))
 grep("person_num", colnames(linkedtrip_combined))
 grep("participation_group", colnames(linkedtrip_combined))
-View(linkedtrip_combined[, c(120, 409)]) ## Drop 120 since 409 is more full.
-View(linkedtrip_combined[, c(4, 180)])
-sum(linkedtrip_combined[, 4] == linkedtrip_combined[, 180]) ## Drop either since both columns are equivalent.
+#View(linkedtrip_combined[, c(120, 409)]) ## Drop 120 since 409 is more full.
+#View(linkedtrip_combined[, c(4, 180)]) ## Drop 180 since 4 is more full
+sum(linkedtrip_combined[, 4] == linkedtrip_combined[, 180], na.rm = T) ## Drop either since both columns are equivalent.
 
 ## Drop based on above.
 linkedtrip_combined <- linkedtrip_combined %>%
@@ -98,7 +102,6 @@ linkedtrip_combined <- linkedtrip_combined %>%
   select(-contains(c("commute_subsidy", "ev_charge", "hh_member", "num_complete", "race", "school", "share", "transportation_barriers", "prev_res", "micromobility", "num_days_complete")))
 
 sort(colnames(linkedtrip_combined))
-
 
 # Clean Data --------------------------------------------------------------
 ## Calculate VMT ----------------------------------------------------------
@@ -163,12 +166,43 @@ linkedtrip_combined <- linkedtrip_combined %>% group_by(person_id) %>%
 
 print(paste0('Trips after exclusions: ', nrow(linkedtrip_combined), ", VMT after exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
 
+## Filter out people who are really young
+print(paste0('Trips before young people/cannot drive exclusions: ', nrow(linkedtrip_combined), ", VMT before exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
+
+linkedtrip_combined <- linkedtrip_combined %>%
+  filter((age != "Under 5") & (age != "5 to 15"))
+
+print(paste0('Trips after young people/cannot drive exclusions: ', nrow(linkedtrip_combined), ", VMT after exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
+
+## Filter weird overnight trips
+print(paste0('Trips before overnight exclusions: ', nrow(linkedtrip_combined), ", VMT before exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
+
+overnight_exclusions <- c("Went to temporary lodging (e.g., hotel, vacation rental)", 
+                          "Spent the night at non-home location out of region")
+
+
+linkedtrip_combined <- linkedtrip_combined %>%
+  filter((!o_purpose %in% overnight_exclusions) & 
+           (!d_purpose %in% overnight_exclusions)) 
+
+print(paste0('Trips after overnight exclusions: ', nrow(linkedtrip_combined), ", VMT after exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
+
+## Filter out vacation
+print(paste0('Trips before vacation exclusions: ', nrow(linkedtrip_combined), ", VMT before exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
+
+linkedtrip_combined <- linkedtrip_combined %>%
+  filter(d_purpose != "Vacation/traveling")
+
+print(paste0('Trips after vacation exclusions: ', nrow(linkedtrip_combined), ", VMT after exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
+
+
 # Write out data to CSV ---------------------------------------------------
 linkedtrip_combined <- linkedtrip_combined %>%
-  select(survey_year, person_id, hh_id, day_id, day_num, linked_trip_id, travel_dow, depart_time, arrive_time, 
-         vmt, linked_trip_weight, person_weight, o_purpose, d_purpose, d_purpose_category, depart_hour, arrive_hour)
+  select(survey_year, person_id, hh_id, day_id, age, can_drive, day_num, linked_trip_id, travel_dow, depart_time, arrive_time, 
+         vmt, linked_trip_weight, person_weight, hh_weight, income_broad, o_purpose, d_purpose, d_purpose_category, depart_hour, arrive_hour)
 
 vmt_df <- linkedtrip_combined
+
 rm(linkedtrip_combined)
 
 write.csv(vmt_df, "../inputs/linkedtrip_vmt.csv", row.names = F)
