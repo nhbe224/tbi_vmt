@@ -199,7 +199,7 @@ print(paste0('Trips after vacation exclusions: ', nrow(linkedtrip_combined), ", 
 # Write out data to CSV ---------------------------------------------------
 linkedtrip_combined <- linkedtrip_combined %>%
   select(survey_year, person_id, hh_id, day_id, age, can_drive, day_num, linked_trip_id, travel_dow, depart_time, arrive_time, 
-         vmt, linked_trip_weight, person_weight, hh_weight, income_broad, o_purpose, d_purpose, d_purpose_category, depart_hour, arrive_hour)
+         vmt, linked_trip_weight, person_weight, hh_weight, income_broad, o_purpose, o_purpose_category, d_purpose, d_purpose_category, depart_hour, arrive_hour)
 
 vmt_df <- linkedtrip_combined
 

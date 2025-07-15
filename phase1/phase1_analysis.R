@@ -119,7 +119,6 @@ work_arr_all <- work_arr
 work_arr <- work_arr_all %>%
   select(person_id, survey_year, work_arr)
 
-
 # Person Weight Reference Table -------------------------------------------
 person_weights <- person_all %>%
   select(person_id, person_weight)
@@ -127,12 +126,61 @@ person_weights <- person_all %>%
 # Weekly Weighted VMT ---------------------------------------------------------
 ## Construct Data -------------------------------------------------------------
 ## Combine Work Arrangement data with TBI Cleaned Data
-vmt_by_work_arr <- work_arr %>%
-  inner_join(vmt_df, c("person_id", "survey_year"))
+vmt_by_work_arr <- vmt_df %>%
+  inner_join(work_arr, c("person_id", "survey_year"))
 
 vmt_weekly <- vmt_by_work_arr %>%
   group_by(person_id, work_arr, person_weight, survey_year) %>%
-  summarize(weekly_vmt = sum(vmt))
+  summarize(weekly_vmt = sum(vmt, na.rm = T))
+
+## Get Commute VMT ---------------------------------------------------------
+commute_vmt <- vmt_by_work_arr %>%
+  select(survey_year, person_id, linked_trip_id, vmt, depart_time, arrive_time, day_num, travel_dow,
+         o_purpose, o_purpose_category, d_purpose, d_purpose_category) %>%
+  arrange(survey_year, person_id, linked_trip_id, day_num, travel_dow)
+
+commute_vmt$day_num <- as.numeric(str_remove(commute_vmt$day_num, "Day "))
+
+## Work trip made that day?
+commute_vmt <- commute_vmt%>%
+  group_by(person_id, day_num) %>%
+  mutate(work_trip_made_today = +(any(d_purpose %in% c("Primary workplace", "Went to work-related activity (e.g., meeting, delivery, worksite)", "Other work-related")))) %>%
+  ungroup
+
+## See if it matches trip before
+commute_vmt <- commute_vmt %>%
+  mutate(wave = case_when(survey_year == 2019 ~ 1,
+                          survey_year == 2021 ~ 2,
+                          survey_year == 2023 ~ 3))
+
+commute_vmt$wave_change = commute_vmt$wave - dplyr::lag(commute_vmt$wave)
+commute_vmt$person_change = commute_vmt$person_id - dplyr::lag(commute_vmt$person_id)
+commute_vmt$day_change = commute_vmt$day_num - dplyr::lag(commute_vmt$day_num)
+commute_vmt$same_day = ifelse((commute_vmt$wave_change == 0) & (commute_vmt$person_change == 0) & (commute_vmt$day_change == 0), 1, 0)
+
+## Get the origin and destination of the trip before
+commute_vmt$o_purpose_before = ifelse(commute_vmt$same_day == 1, dplyr::lag(commute_vmt$o_purpose), NA)
+commute_vmt$d_purpose_before = ifelse(commute_vmt$same_day == 1, dplyr::lag(commute_vmt$d_purpose), NA)
+
+## Account for HBS, HBW
+commute_vmt$o_purpose_gas <- ifelse(commute_vmt$o_purpose == 'Got gas', 1, 0)
+commute_vmt$d_purpose_before_gas <- ifelse(commute_vmt$d_purpose_before == "Got gas", 1, 0)
+commute_vmt$gas_only_tour = ifelse(commute_vmt$o_purpose_before == "Went home" & commute_vmt$d_purpose == "Went home", 1, 0)
+
+## Use this information 
+commute_vmt <- commute_vmt %>%
+  mutate(trip_in_commute_flag = case_when(
+    (o_purpose  == "Went home") & (d_purpose %in% c("Went to work-related activity (e.g., meeting, delivery, worksite)", "Primary workplace")) ~ 1,
+    (o_purpose %in% c("Went to work-related activity (e.g., meeting, delivery, worksite)", "Primary workplace")) & (d_purpose  == "Went home") ~ 1,
+    (o_purpose_before == "Went home") & (d_purpose %in% c("Went to work-related activity (e.g., meeting, delivery, worksite)", "Primary workplace")) ~ 1,
+    (o_purpose_before %in% c("Went to work-related activity (e.g., meeting, delivery, worksite)", "Primary workplace")) & (d_purpose == "Went home") ~ 1,
+    (o_purpose == "Went home") & (d_purpose == "Got gas") & (gas_only_tour == 0) ~ 1,
+    (o_purpose == "Got gas") & (d_purpose == "Went home") & (gas_only_tour == 0) ~ 1))
+
+commuting_person <- commute_vmt %>%
+  filter(person_id == 1813556901) %>%
+  select(survey_year, person_id, linked_trip_id, vmt, depart_time, arrive_time, day_num, travel_dow,
+         o_purpose, d_purpose, d_purpose_category, trip_in_commute_flag, o_purpose_before, d_purpose_before, gas_only_tour)
 
 ## Examine overnight people
 overnight <- linkedtrip_all %>%

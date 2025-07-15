@@ -30,7 +30,7 @@ setwd("D:/neeco/thesis/tbi_vmt/phase2/")
 sld2018 <- fread("D:/neeco/rdc_census/sld_change_file/outputs/sld_change_file2018.csv")
 
 ## Read in jobs within 30 minute transit for 2021
-mn_transit2021_load <- fread("D:/neeco/rdc_census/aaa_change_file/inputs/transit2021/Minnesota_transit_2021/Minnesota_27_transit_block_group_2021.csv")
+mn_transit2021_load <- fread("D:/neeco/rdc_census/aaa_change_file/inputs/transit2021/Minnesota_27_transit_block_group_2021.csv")
 wi_transit2021_load <- fread("D:/neeco/rdc_census/aaa_change_file/inputs/transit2021/Wisconsin_55_transit_block_group_2021.csv")
 transit2021_load <- rbind(mn_transit2021_load, wi_transit2021_load)
 
@@ -57,17 +57,38 @@ vmt_weekly_w_person <- vmt_weekly %>%
 ## Look at non-response/missing columns
 unique(vmt_weekly_w_person$age)
 unique(vmt_weekly_w_person$race) 
-unique(vmt_weekly_w_person$gender) # Filter out Prefer not to answer
+unique(vmt_weekly_w_person$gender)
 unique(vmt_weekly_w_person$employment) 
+
+## Plot distributions before grouping
+ggplot(vmt_weekly_w_person, aes(x=age)) + geom_bar() + ggtitle("Distribution of Age Groups") +
+  xlab("Age") + ylab("Count") + geom_text(stat='count', aes(label=..count..), vjust=-0.2)
+
+ggplot(vmt_weekly_w_person, aes(x=gender)) + geom_bar() + ggtitle("Distribution of Genders") +
+  xlab("Gender") + ylab("Count") + theme(axis.text.x=element_text(size=6, angle = 20)) + 
+  geom_text(stat='count', aes(label=..count..), vjust=-0.2)
+
+ggplot(vmt_weekly_w_person, aes(x=employment)) + geom_bar() + ggtitle("Distribution of Employment") +
+  xlab("Employment") + ylab("Count") + geom_text(stat='count', aes(label=..count..), vjust=-0.2)
+
+ggplot(vmt_weekly_w_person, aes(x=race)) + geom_bar() + ggtitle("Distribution of Racial Groups") +
+  xlab("Race") + ylab("Count") + theme(axis.text.x=element_text(size=6, angle = 20)) + 
+  geom_text(stat='count', aes(label=..count..), vjust=-0.2)
 
 ## Age group
 vmt_weekly_w_person <- vmt_weekly_w_person %>% 
   rename(age_group = age) 
 
+vmt_weekly_w_person <- vmt_weekly_w_person %>%
+  mutate(age_group = case_when(age_group %in% c("18 to 24", "25 to 34") ~ "18 to 34",
+                               age_group %in% c("35 to 44", "45 to 54")  ~ "35 to 54",
+                               age_group %in% c("55 to 64", "65 to 74", "75 or older") ~ "55 or older"))
+
 vmt_weekly_w_person$age_group <- factor(vmt_weekly_w_person$age_group, 
-                                        levels = c("18 to 24", "25 to 34", "35 to 44", "45 to 54", "55 to 64", "65 to 74", "75 or older" ))
+                                        levels = c("18 to 34", "35 to 54", "55 or older"))
 
 ## Race
+vmt_weekly_w_person$race <- ifelse(vmt_weekly_w_person$race == "White", "White", "nonWhite")
 vmt_weekly_w_person$race <- factor(vmt_weekly_w_person$race, 
                                    levels = unique(vmt_weekly_w_person$race))
 
@@ -91,40 +112,59 @@ vmt_weekly_w_hh <- vmt_weekly_w_person %>%
   left_join(hh_keep)
 
 ### Clean household data
-## See which variables need to be dropped
 unique(vmt_weekly_w_hh$num_kids)
 unique(vmt_weekly_w_hh$num_workers)
 unique(vmt_weekly_w_hh$num_vehicles)
-unique(vmt_weekly_w_hh$income_detailed) # Drop undisclosed
+unique(vmt_weekly_w_hh$income_detailed) 
 
-## Make numeric variables numeric
-vmt_weekly_w_hh$num_kids <- as.numeric(substr(vmt_weekly_w_hh$num_kids, 1, 2))
-vmt_weekly_w_hh$num_adults <- as.numeric(substr(vmt_weekly_w_hh$num_adults, 1, 2))
-vmt_weekly_w_hh$num_workers <- as.numeric(substr(vmt_weekly_w_hh$num_workers, 1, 2))
-vmt_weekly_w_hh$num_vehicles <- as.numeric(substr(vmt_weekly_w_hh$num_vehicles, 1, 2))
+ggplot(vmt_weekly_w_hh, aes(x=num_kids)) + geom_bar() + ggtitle("Distribution of Kids") +
+  xlab("Number of Kids") + ylab("Count") + geom_text(stat='count', aes(label=..count..), vjust=-0.2)
 
-## Income
+ggplot(vmt_weekly_w_hh, aes(x=num_vehicles)) + geom_bar() + ggtitle("Distribution of Vehicles") +
+  xlab("Number of Vehicles") + ylab("Count") + geom_text(stat='count', aes(label=..count..), vjust=-0.2)
+
+#### Income
 vmt_weekly_w_hh$income_detailed <- factor(vmt_weekly_w_hh$income_detailed, 
                                           levels = c( "<$15K", "$15-25K",  "$25-35K", "$35-50K", "$50-75K",   
                                                       "$75-100K", "$100-150K","$150-200K", "$200-$250K", "$250K+", "Undisclosed"))
 
+ggplot(vmt_weekly_w_hh, aes(x=income_detailed)) + geom_bar() + ggtitle("Distribution of Household Income") +
+  xlab("Income Level") + ylab("Count") + theme(axis.text.x=element_text(size=6, angle = 20)) + 
+  geom_text(stat='count', aes(label=..count..), vjust=-0.2)
 
-## Create variable for number of teleworkers in household
+## Make numeric variables numeric
+vmt_weekly_w_hh$num_kids <- as.numeric(substr(vmt_weekly_w_hh$num_kids, 1, 2))
+vmt_weekly_w_hh$num_adults <- as.numeric(substr(vmt_weekly_w_hh$num_adults, 1, 2))
+vmt_weekly_w_hh$num_vehicles <- as.numeric(substr(vmt_weekly_w_hh$num_vehicles, 1, 2))
+
+## Create variable for number of additional teleworkers in household
 vmt_weekly_w_hh$hybrid_or_remote <- ifelse(vmt_weekly_w_hh$work_arr %in% c("Always Remote", "Hybrid"), 1, 0)
 vmt_weekly_w_hh <- vmt_weekly_w_hh %>%
-  group_by(hh_id) %>% mutate(num_hybrid_or_remote = sum(hybrid_or_remote)) %>%
+  group_by(hh_id) %>% mutate(num_hybrid_or_remote = case_when(work_arr %in% c("Always In-Person") ~ sum(hybrid_or_remote),
+                                                              work_arr %in% c("Always Remote", "Hybrid") ~ sum(hybrid_or_remote) - 1)) %>%
   select(-hybrid_or_remote)
 
-# same_hh <- vmt_weekly_w_hh %>%
-#   group_by(hh_id) %>%
-#   filter(n() > 1)
+## Multiple people in one household
+more_than_one_hh <- vmt_weekly_w_hh %>% group_by(hh_id) %>% filter(n()>1) %>%
+  select(person_id, hh_id, survey_year, work_arr, num_hybrid_or_remote)
 
-### For regression on categorical variables like race, income, be explicit to computer
-### that it's categorical OR have them in their own column as binaries (i.e. race_White, race_Black etc.)
+## Group variables
+vmt_weekly_w_hh <- vmt_weekly_w_hh %>%
+  mutate(num_kids = case_when(num_kids == 0 ~ "0 kids",
+                              num_kids > 0 ~ "1+ kid"),
+         num_vehicles = case_when(num_vehicles == 0 ~ "0 vehicles",
+                                  num_vehicles == 1 ~ "1 vehicle",
+                                  num_vehicles >= 2 ~ "2+ vehicles"),
+         income_detailed = case_when(income_detailed %in% c("<$15K", "$15-25K", "$25-35K", "$35-50K") ~ "<$50K",
+                                     income_detailed %in% c("$50-75K", "$75-100K") ~ "$50-$100K",
+                                     income_detailed %in% c("$100-150K") ~ "$100-$150K",
+                                     income_detailed %in% c("$150-200K") ~ "$150-$200K",
+                                     income_detailed %in% c("$200-$250K", "$250K+") ~ "$200K+",
+                                     income_detailed %in% c("Undisclosed") ~ "Undisclosed"))
 
 ## Join on Built Environment Variables -------------------------------------
 sld2018 <- sld2018 %>%
-  select(geoid, jobs_per_hh, emp8_ent, intersection_den)
+  select(bg2010, jobs_per_hh, emp8_ent, intersection_den)
 
 transit2021 <- transit2021_load %>%
   filter(threshold == 1800) %>%
@@ -132,10 +172,11 @@ transit2021 <- transit2021_load %>%
   select(geoid, transit_jobs30) 
 
 vmt_weekly_w_be <- vmt_weekly_w_hh %>%
-  left_join(sld2018, by = c("home_bg_2010" = "geoid"))
+  left_join(sld2018, by = c("home_bg_2010" = "bg2010"))
 
 vmt_weekly_w_be <- vmt_weekly_w_be %>%
   left_join(transit2021, by = c("home_bg_2010" = "geoid"))
+
 
 ## Join on Economic Variables ----------------------------------------------
 ## Gas prices
@@ -152,39 +193,60 @@ vmt_weekly_w_econ <- vmt_weekly_w_be %>%
 vmt_weekly_for_model <- vmt_weekly_w_econ
 
 ### Convert to survey year to factor
-vmt_weekly_for_model$survey_year <- as.character(vmt_weekly_for_model$survey_year)
+vmt_weekly_for_model$year2021 <- ifelse(vmt_weekly_for_model$survey_year == 2021, 1, 0)
+vmt_weekly_for_model$year2023 <- ifelse(vmt_weekly_for_model$survey_year == 2023, 1, 0)
+
 write.csv(vmt_weekly_for_model, "./outputs/vmt_weekly_for_model.csv", row.names = F)
 
 
 # Relevel -----------------------------------------------------------------
-vmt_weekly_for_model$age_group <- relevel(vmt_weekly_for_model$age_group, ref = "35 to 44")
-vmt_weekly_for_model$income_detailed <- relevel(vmt_weekly_for_model$income_detailed, ref = "$50-75K")
+vmt_weekly_for_model$age_group <- relevel(vmt_weekly_for_model$age_group, ref = "35 to 54")
+vmt_weekly_for_model$income_detailed <- factor(vmt_weekly_for_model$income_detailed, 
+                                              c("<$50K", "$50-$100K", "$100-$150K", "$150-$200K", "$200K+", "Undisclosed"))
+vmt_weekly_for_model$income_detailed <- relevel(vmt_weekly_for_model$income_detailed, ref = "$50-$100K")
 
 
 
 # Multinomial Logit Model -------------------------------------------------
+## Full Model --------------------------------------------------------------
 mnl_model1 <- multinom(work_arr ~ age_group + gender + employment + race + 
-                          income_detailed + num_kids + num_workers + num_vehicles + num_hybrid_or_remote +
-                         jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + gas_price, 
+                          income_detailed + num_kids + num_vehicles + num_hybrid_or_remote +
+                         jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 +year2021 +year2023,
                         data = vmt_weekly_for_model)
 
 stargazer::stargazer(mnl_model1, type = "text")
+stargazer::stargazer(mnl_model1, type = "latex", single.row = T, omit.stat = "aic")
 
 
-# The relative probability of being always remote rather than being always in person is 22%
-# higher for people ages 18 to 24 than for people ages 35 to 44, all else equal.
-exp(0.199) 
-exp(-0.245)
+## No Vehicles  --------------------------------------------------------------
+mnl_model2 <- multinom(work_arr ~ age_group + gender + employment + race + 
+                         income_detailed + num_kids + num_hybrid_or_remote +
+                         jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 +year2021 +year2023,
+                       data = vmt_weekly_for_model)
 
-# The relative probability of being hybrid rather than being always in person is 72.9%
-# lower for people ages 25 to 34 than for people ages 16 to 24, all else equal.
+stargazer::stargazer(mnl_model2, type = "text")
 
+## Interact Women and Kids  --------------------------------------------------------------
+mnl_model3 <- multinom(work_arr ~ age_group + gender + employment + race + 
+                         income_detailed + gender:num_kids + num_hybrid_or_remote +
+                         jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 +year2021 +year2023,
+                       data = vmt_weekly_for_model)
+
+stargazer::stargazer(mnl_model3, type = "text")
+
+
+## Nested Model ------------------------------------------------------------
+#### Nest hybrid and always remote (option 1)
+#### Nest always in-person and hybrid (option 2)
+
+
+
+
+# The relative probability of being always remote rather than being always in person is 12%
+# higher for people ages 18 to 34 than for people ages 35 to 54, all else equal.
+exp(0.122) 
+exp(-0.013)
 
 # Explore separate model for self employed and part time.
-# Group income categories
-# Group race into NH-white and everyone else.
-# Number of hybrid workers/remote workers excluding self
-# Presence of kids? 
-# Number of vehicles: factor (no vehicles, 1+ vehicle)
-# Include year as well.
+
 
