@@ -15,10 +15,16 @@ options(scipen = 999)
 ## Bring in cleaned weekly VMT data
 source("../phase2/phase2_mnl_model.R")
 setwd("D:/neeco/thesis/tbi_vmt/phase3/")
-
+commute_vmt_daily <- read.csv("../phase1/outputs/commute_vmt_daily.csv")
+commute_vmt_daily$survey_year <- factor(commute_vmt_daily$survey_year)
 
 # Clean Data --------------------------------------------------------------
 vmt_weekly_for_model$ln_weekly_vmt <- log(vmt_weekly_for_model$weekly_vmt)
+
+vmt_weekly_for_model$ln_work_tour_vmt_weekly <- log(vmt_weekly_for_model$work_tour_vmt_weekly + 1)
+
+vmt_weekly_for_model$ln_nonwork_tour_vmt_weekly <- log(vmt_weekly_for_model$nonwork_tour_vmt_weekly + 1)
+
 
 # Crosstab for Count of Workers -------------------------------------------
 vmt_weekly_for_model %>%
@@ -42,7 +48,7 @@ vmt_weekly_for_model$income_detailed <- relevel(vmt_weekly_for_model$income_deta
 
 # Full Model  ------------------------------------------------------------
 ols_model1 <- lm(ln_weekly_vmt ~ work_arr + age_group + gender + employment + race + 
-                   income_detailed + num_kids + num_vehicles + num_hybrid_or_remote +
+                   income_detailed + num_kids + gender:num_kids + num_vehicles + num_hybrid_or_remote +
                    jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + survey_year, 
                    data = vmt_weekly_for_model) ## Drop gas price since its perfectly collinear with survey year.
 
@@ -53,11 +59,10 @@ stargazer::stargazer(ols_model1, type = "latex", single.row = T, omit.stat = c("
 print(paste0("On average, always remote workers are associated with a ", round(100 * (exp(summary(ols_model1)$coefficients[2, 1]) - 1), 1), "% difference in weekly VMT relative to always in-person workers."))
 print(paste0("On average, hybrid workers are associated with a ", round(100 * (exp(summary(ols_model1)$coefficients[3, 1]) - 1), 1), "% difference in weekly VMT relative to always in-person workers."))
 
-ols_model1$rank == ncol(model.matrix(ols_model1))
 
 # Always In-Person -----------------------------------------------------
 ols_model2 <- lm(ln_weekly_vmt ~ age_group + gender + employment + race + 
-                   income_detailed + num_kids + num_vehicles + num_hybrid_or_remote +
+                   income_detailed +  gender:num_kids + num_kids + num_vehicles + num_hybrid_or_remote +
                    jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + survey_year, 
                  data = vmt_weekly_for_model[vmt_weekly_for_model$work_arr == "Always In-Person", ]) 
 
@@ -88,4 +93,61 @@ stargazer::stargazer(ols_model4, type = "text")
 
 ols_model4$rank == ncol(model.matrix(ols_model4))
 
-## Model with work commute VMT and non-work VMT.
+
+# Non-Work VMT Only --------------------------------------------------------
+ols_model5 <- lm(ln_nonwork_tour_vmt_weekly ~ work_arr + age_group + gender + employment + race + 
+                   income_detailed + num_kids + gender:num_kids + num_vehicles + num_hybrid_or_remote +
+                   jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + survey_year, 
+                 data = vmt_weekly_for_model) 
+
+summary(ols_model5)
+stargazer::stargazer(ols_model5, type = "text")
+
+exp(summary(ols_model5)$coefficients[2, 1]) ## Non work VMT increases by factor of 2.35.
+exp(summary(ols_model5)$coefficients[3, 1]) ## Factor of 1.50 for hybrid. 
+
+print(paste0("On average, always remote workers are associated with a ", round(100 * (exp(summary(ols_model5)$coefficients[2, 1]) - 1), 1), "% difference in weekly non-work VMT relative to always in-person workers."))
+print(paste0("On average, hybrid workers are associated with a ", round(100 * (exp(summary(ols_model5)$coefficients[3, 1]) - 1), 1), "% difference in weekly non-work VMT relative to always in-person workers."))
+
+
+# Work VMT Only --------------------------------------------------------
+ols_model6 <- lm(ln_work_tour_vmt_weekly ~ work_arr + age_group + gender + employment + race + 
+                   income_detailed + num_kids + gender:num_kids + num_vehicles + num_hybrid_or_remote +
+                   jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + survey_year, 
+                 data = vmt_weekly_for_model) 
+
+summary(ols_model6)
+stargazer::stargazer(ols_model6, type = "text")
+
+
+# Daily Models ------------------------------------------------------------
+vmt_daily <- commute_vmt_daily %>%
+  left_join(vmt_weekly_for_model, by = c("person_id", "survey_year")) %>%
+  mutate(vmt_daily = work_tour_vmt_daily + nonwork_tour_vmt_daily,
+         ln_vmt_daily = log(vmt_daily + 1),
+         ln_work_tour_vmt_daily = log(work_tour_vmt_daily + 1),
+         ln_nonwork_tour_vmt_daily = log(nonwork_tour_vmt_daily + 1))
+
+dows <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+ols_model_dow <- list()
+for(i in 1:length(dows)){
+  ols_model_dow[[i]] <- lm(ln_vmt_daily ~ work_arr + age_group + gender + employment + race + 
+                             income_detailed + num_kids + gender:num_kids + num_vehicles + num_hybrid_or_remote +
+                             jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + survey_year, 
+                           data = vmt_daily[vmt_daily$travel_dow == dows[i], ]) 
+  
+  print(paste0("On ", dows[i], " on average, always remote workers are associated with a ", round(100 * (exp(summary(ols_model_dow[[i]])$coefficients[2, 1]) - 1), 1), "% difference in daily VMT relative to always in-person workers."))
+  print(paste0("On ", dows[i], " on average, hybrid workers are associated with a ", round(100 * (exp(summary(ols_model_dow[[i]])$coefficients[3, 1]) - 1), 1), "% difference in daily VMT relative to always in-person workers."))
+}
+
+## Rebound: percent of work tour VMT savings offset by non work tour VMT increase
+## Apply models to people in model, how much does work arrangement matter?
+## Test in 2023 with 2019 work arrangement distributions.
+## Set of models for each weekday to see displacement.
+## Set of models for each weekday based on day arrangement.
+
+## Update slides for Pat.
+
+
+
+

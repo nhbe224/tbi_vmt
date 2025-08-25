@@ -196,6 +196,12 @@ vmt_weekly_for_model <- vmt_weekly_w_econ
 vmt_weekly_for_model$year2021 <- ifelse(vmt_weekly_for_model$survey_year == 2021, 1, 0)
 vmt_weekly_for_model$year2023 <- ifelse(vmt_weekly_for_model$survey_year == 2023, 1, 0)
 
+
+# Get Commute VMT and Write Out -------------------------------------------
+vmt_weekly_for_model$nonwork_tour_vmt_weekly <- vmt_weekly_for_model$weekly_vmt - vmt_weekly_for_model$work_tour_vmt_weekly
+vmt_weekly_for_model <- vmt_weekly_for_model %>%
+  relocate(person_id, work_arr, survey_year, weekly_vmt, work_tour_vmt_weekly, nonwork_tour_vmt_weekly)
+
 write.csv(vmt_weekly_for_model, "./outputs/vmt_weekly_for_model.csv", row.names = F)
 
 
@@ -217,6 +223,13 @@ mnl_model1 <- multinom(work_arr ~ age_group + gender + employment + race +
 stargazer::stargazer(mnl_model1, type = "text")
 stargazer::stargazer(mnl_model1, type = "latex", single.row = T, omit.stat = "aic")
 
+# Relative probability of being always remote rather than being always
+# in-person is 14% higher for those with an additional remote/hybrid worker in their
+# household than those without an additional remote/hybrid worker.
+
+# Relative probability of being hybrid rather than being always
+# in-person is 36% higher for those with an additional remote/hybrid worker in their
+# household than those without an additional remote/hybrid worker.
 
 ## No Vehicles  --------------------------------------------------------------
 mnl_model2 <- multinom(work_arr ~ age_group + gender + employment + race + 

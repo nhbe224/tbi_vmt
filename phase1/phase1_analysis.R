@@ -3,12 +3,21 @@
 setwd("D:/neeco/thesis/tbi_vmt/phase1/")
 
 # Load Packages -----------------------------------------------------------
-packages_vector <- c("tidyverse", "sf", "tigris", "tidycensus", "data.table", "janitor", "tools", "spatstat", "gridExtra", "grid", "gtable")
+packages_vector <- c("tidyverse", "sf", "tigris", "tidycensus", "data.table", "patchwork", 
+                     "janitor", "tools", "spatstat", "gridExtra", "grid", "gtable", "ggpattern")
 need_to_install <- packages_vector[!(packages_vector %in% installed.packages()[,"Package"])]
 if (length(need_to_install)) install.packages(need_to_install)
 lapply(packages_vector, library, character.only = TRUE)
 options(scipen = 999)
 
+
+# Helper Function ---------------------------------------------------------
+fill_nearest = function(x){
+  keys=which(!is.na(x))
+  if(length(keys)==0) return(NA)
+  b = map_dbl(seq.int(x), ~keys[which.min(abs(.x-keys))])
+  x[b]
+}
 
 # Globals -----------------------------------------------------------------
 twork_limit_daily <- 1
@@ -129,58 +138,55 @@ person_weights <- person_all %>%
 vmt_by_work_arr <- vmt_df %>%
   inner_join(work_arr, c("person_id", "survey_year"))
 
-vmt_weekly <- vmt_by_work_arr %>%
-  group_by(person_id, work_arr, person_weight, survey_year) %>%
-  summarize(weekly_vmt = sum(vmt, na.rm = T))
-
-## Get Commute VMT ---------------------------------------------------------
+# Get commute VMT --------------------------------------------------------
 commute_vmt <- vmt_by_work_arr %>%
-  select(survey_year, person_id, linked_trip_id, vmt, depart_time, arrive_time, day_num, travel_dow,
-         o_purpose, o_purpose_category, d_purpose, d_purpose_category) %>%
-  arrange(survey_year, person_id, linked_trip_id, day_num, travel_dow)
+  arrange(person_id, day_num, depart_time) %>%
+  relocate(person_id, day_num, o_purpose_category, d_purpose_category)
 
 commute_vmt$day_num <- as.numeric(str_remove(commute_vmt$day_num, "Day "))
 
-## Work trip made that day?
-commute_vmt <- commute_vmt%>%
+commute_vmt <- commute_vmt %>%
+  mutate(tour_id_count = if_else((person_id != lag(person_id)) | (day_num != lag(day_num)), 1, if_else((o_purpose_category %in% c('Home', 'Overnight')), 1, 0), missing = 1)) %>%
+  relocate(person_id, day_num, tour_id_count)
+
+         
+commute_vmt <- commute_vmt %>%
   group_by(person_id, day_num) %>%
-  mutate(work_trip_made_today = +(any(d_purpose %in% c("Primary workplace", "Went to work-related activity (e.g., meeting, delivery, worksite)", "Other work-related")))) %>%
-  ungroup
+  mutate(tour_id = cumsum(tour_id_count)) %>%
+  relocate(person_id, day_num, tour_id) %>%
+  select(-tour_id_count)
 
-## See if it matches trip before
+commute_vmt$work_trip = ifelse(commute_vmt$o_purpose_category %in% c("Work", "Work related") | commute_vmt$d_purpose_category %in% c("Work", "Work related"), 1, 0)
 commute_vmt <- commute_vmt %>%
-  mutate(wave = case_when(survey_year == 2019 ~ 1,
-                          survey_year == 2021 ~ 2,
-                          survey_year == 2023 ~ 3))
+  relocate(person_id, day_num, tour_id, work_trip)
 
-commute_vmt$wave_change = commute_vmt$wave - dplyr::lag(commute_vmt$wave)
-commute_vmt$person_change = commute_vmt$person_id - dplyr::lag(commute_vmt$person_id)
-commute_vmt$day_change = commute_vmt$day_num - dplyr::lag(commute_vmt$day_num)
-commute_vmt$same_day = ifelse((commute_vmt$wave_change == 0) & (commute_vmt$person_change == 0) & (commute_vmt$day_change == 0), 1, 0)
-
-## Get the origin and destination of the trip before
-commute_vmt$o_purpose_before = ifelse(commute_vmt$same_day == 1, dplyr::lag(commute_vmt$o_purpose), NA)
-commute_vmt$d_purpose_before = ifelse(commute_vmt$same_day == 1, dplyr::lag(commute_vmt$d_purpose), NA)
-
-## Account for HBS, HBW
-commute_vmt$o_purpose_gas <- ifelse(commute_vmt$o_purpose == 'Got gas', 1, 0)
-commute_vmt$d_purpose_before_gas <- ifelse(commute_vmt$d_purpose_before == "Got gas", 1, 0)
-commute_vmt$gas_only_tour = ifelse(commute_vmt$o_purpose_before == "Went home" & commute_vmt$d_purpose == "Went home", 1, 0)
-
-## Use this information 
 commute_vmt <- commute_vmt %>%
-  mutate(trip_in_commute_flag = case_when(
-    (o_purpose  == "Went home") & (d_purpose %in% c("Went to work-related activity (e.g., meeting, delivery, worksite)", "Primary workplace")) ~ 1,
-    (o_purpose %in% c("Went to work-related activity (e.g., meeting, delivery, worksite)", "Primary workplace")) & (d_purpose  == "Went home") ~ 1,
-    (o_purpose_before == "Went home") & (d_purpose %in% c("Went to work-related activity (e.g., meeting, delivery, worksite)", "Primary workplace")) ~ 1,
-    (o_purpose_before %in% c("Went to work-related activity (e.g., meeting, delivery, worksite)", "Primary workplace")) & (d_purpose == "Went home") ~ 1,
-    (o_purpose == "Went home") & (d_purpose == "Got gas") & (gas_only_tour == 0) ~ 1,
-    (o_purpose == "Got gas") & (d_purpose == "Went home") & (gas_only_tour == 0) ~ 1))
+  group_by(person_id, day_num, tour_id) %>%
+  mutate(work_tour = max(work_trip)) %>%
+  relocate(person_id, day_num, tour_id, work_trip, work_tour)
 
-commuting_person <- commute_vmt %>%
-  filter(person_id == 1813556901) %>%
-  select(survey_year, person_id, linked_trip_id, vmt, depart_time, arrive_time, day_num, travel_dow,
-         o_purpose, d_purpose, d_purpose_category, trip_in_commute_flag, o_purpose_before, d_purpose_before, gas_only_tour)
+commute_vmt$work_tour_vmt <- commute_vmt$work_tour * commute_vmt$vmt
+commute_vmt$nonwork_tour_vmt <- ifelse(commute_vmt$work_tour == 0, commute_vmt$vmt, 0)
+
+commute_vmt_daily <- commute_vmt %>%
+  select(person_id, day_num, work_tour, work_tour_vmt, nonwork_tour_vmt, person_weight, survey_year, travel_dow) %>%
+  group_by(person_id, day_num, travel_dow, person_weight, survey_year) %>%
+  summarize(work_tour_vmt_daily = sum(work_tour_vmt),
+            nonwork_tour_vmt_daily = sum(nonwork_tour_vmt)) 
+
+commute_vmt_daily$person_id <- as.numeric(commute_vmt_daily$person_id)
+commute_vmt_daily$survey_year <- factor(commute_vmt_daily$survey_year)
+
+write.csv(commute_vmt_daily, "./outputs/commute_vmt_daily.csv", row.names = F)
+
+commute_vmt_weekly <- commute_vmt %>%
+  select(person_id, work_tour, work_tour_vmt, person_weight) %>%
+  group_by(person_id, person_weight) %>%
+  summarize(work_tour_vmt_weekly = sum(work_tour_vmt))
+
+vmt_weekly <- vmt_by_work_arr %>%
+  group_by(person_id, work_arr, person_weight, survey_year) %>%
+  summarize(weekly_vmt = sum(vmt, na.rm = T))
 
 ## Examine overnight people
 overnight <- linkedtrip_all %>%
@@ -204,9 +210,13 @@ overnight <- overnight %>%
 vmt_weekly <- vmt_weekly %>%
   filter(!person_id %in% overnight_ids)
 
+vmt_weekly <- vmt_weekly %>%
+  left_join(average_commute_vmt)
+
 ## Write out data
 write.csv(vmt_weekly, "./outputs/vmt_weekly.csv", row.names = F)
 
+## Plot Data -------------------------------------------------------------
 ## Weekly VMT by Work Arrangement (weighted by person)
 weighted_vmt_weekly <- vmt_weekly %>%
   group_by(work_arr, survey_year) %>% 
@@ -214,19 +224,19 @@ weighted_vmt_weekly <- vmt_weekly %>%
             median_weekly_vmt = weighted.median(weekly_vmt, person_weight, na.rm = T))
 print(weighted_vmt_weekly)
 
-#### Weekly VMT by Work Arrangement (unweighted)
+## Weekly VMT by Work Arrangement (unweighted)
 unweighted_vmt_weekly <- vmt_weekly %>%
   group_by(work_arr, survey_year) %>% 
   summarize(mean_weekly_vmt = mean(weekly_vmt, na.rm = T),
             median_weekly_vmt = median(weekly_vmt, person_weight, na.rm = T))
-
-## Plot Data -------------------------------------------------------------
 weighted_vmt_weekly$survey_year <- factor(weighted_vmt_weekly$survey_year, c(2019, 2021, 2023))
 
 ggplot(weighted_vmt_weekly, aes(fill = work_arr, x = survey_year, y = mean_weekly_vmt)) + 
+  geom_bar(position="dodge", stat="identity") + ggtitle("Average Weekly VMT by Work Arrangement (Weighted)") +
   xlab("Year") + ylab("Average Weekly VMT") + guides(fill=guide_legend(title="")) + theme(legend.position="bottom") +
   geom_text(aes(label = round(mean_weekly_vmt)), size = 3, vjust = -0.25, position = position_dodge(.9)) +
   ylim(0, 215)
+ggsave("./outputs/weighted_weekly_vmt.jpg", width = 8, height = 6, units = "in")
 
 unweighted_vmt_weekly$survey_year <- factor(unweighted_vmt_weekly$survey_year, c(2019, 2021, 2023))
 
@@ -235,6 +245,43 @@ ggplot(unweighted_vmt_weekly, aes(fill = work_arr, x = survey_year, y = mean_wee
   xlab("Year") + ylab("Average Weekly VMT") + guides(fill=guide_legend(title="")) + theme(legend.position="bottom") +
   geom_text(aes(label = round(mean_weekly_vmt)), size = 3, vjust = -0.25, position = position_dodge(.9)) +
   ylim(0, 205)
+ggsave("./outputs/unweighted_weekly_vmt.jpg", width = 8, height = 6, units = "in")
+
+
+# Rebound Effects ---------------------------------------------------------
+# Rebound Effects ---------------------------------------------------------
+### Always remote: 140.96-4.69 = 133.31 savings in mean work VMT
+### Always remote: 138-64.3 = 73.7 increase in mean non work VMT
+### rebound effect 73.1/133.1 = 55% rebound effect. Net savings overall.
+
+### Hybrid: 138-87 = 51 savings in mean work VMT
+### Hybrid: 89.2-64.3 = 24.9 savings in mean non work VMT
+### Rebound effect = 48% rebound effect
+
+mean_vmt_purpose_arr <- vmt_weekly %>%
+  group_by(work_arr, survey_year) %>%
+  summarize(mean_work_tour_vmt = mean(work_tour_vmt_weekly, na.rm = T),
+            mean_nonwork_tour_vmt = mean(weekly_vmt - work_tour_vmt_weekly, na.rm = T))
+
+mean_vmt_aip <- mean_vmt_purpose_arr %>%
+  filter(work_arr == "Always In-Person")
+
+mean_vmt_purpose_arr <- mean_vmt_purpose_arr %>%
+  filter(work_arr != "Always In-Person")
+
+## Create always in-person dataframe to get rebound effects.
+mean_vmt_aip <- rbind(mean_vmt_aip, mean_vmt_aip)
+mean_vmt_aip[c(1:3), 1] <- "Always Remote"
+mean_vmt_aip[c(4:6), 1] <- "Hybrid"
+colnames(mean_vmt_aip)[c(3:4)] <- c("aip_mean_work_tour_vmt", "aip_mean_nonwork_tour_vmt")
+
+## Rebound effect dataframe
+rebound_effect <- mean_vmt_purpose_arr %>% inner_join(mean_vmt_aip) %>%
+  mutate(work_vmt_savings = aip_mean_work_tour_vmt - mean_work_tour_vmt,
+         nonwork_vmt_increase = mean_nonwork_tour_vmt - aip_mean_nonwork_tour_vmt,
+         rebound_effect = nonwork_vmt_increase / work_vmt_savings) %>%
+  select(work_arr, survey_year, work_vmt_savings, nonwork_vmt_increase, rebound_effect) %>%
+  arrange(survey_year, work_arr)
 
 # Trip-Level VMT Distribution ----------------------------------------------
 ## Construct Data ----------------------------------------------------------
@@ -326,10 +373,11 @@ ggplot(stated_work_arr_pct_w, aes(fill = job_type, x = survey_year, y = percent)
 
 revealed_work_arr_pct_w$survey_year <- factor(revealed_work_arr_pct_w$survey_year, c(2019, 2021, 2023))
 
-ggplot(revealed_work_arr_pct_w, aes(fill = work_arr, x = survey_year, y = percent)) + 
-  geom_bar(position="dodge", stat="identity") + ggtitle("Revealed Distirbution of Work Arrangements by Year (Weighted)") +
+p1 <-ggplot(revealed_work_arr_pct_w, aes(fill = work_arr, x = survey_year, y = percent)) + 
+  geom_bar(position="dodge", stat="identity") + ggtitle("Observed Distirbution of Work Arrangements by Year (Weighted)") +
   xlab("Year") + ylab("Percent") + guides(fill=guide_legend(title="")) + theme(legend.position="right") +
-  geom_text(aes(label = round(percent, 2)), size = 3, vjust = -0.25, position = position_dodge(.9))
+  geom_text(aes(label = round(percent, 2)), size = 3, vjust = -0.25, position = position_dodge(.9)) + ylim(0, 1)
+#ggsave("./outputs/weighted_work_arr_dist.jpg", width = 8, height = 6, units = "in")
 
 ## Unweighted
 stated_work_arr_pct_u$survey_year <- factor(stated_work_arr_pct_u$survey_year, c(2019, 2021, 2023))
@@ -341,69 +389,110 @@ ggplot(stated_work_arr_pct_u, aes(fill = job_type, x = survey_year, y = percent)
 
 revealed_work_arr_pct_u$survey_year <- factor(revealed_work_arr_pct_u$survey_year, c(2019, 2021, 2023))
 
-ggplot(revealed_work_arr_pct_u, aes(fill = work_arr, x = survey_year, y = percent)) + 
-  geom_bar(position="dodge", stat="identity") + ggtitle("Revealed Distirbution of Work Arrangements by Year (Unweighted)") +
+p2 <- ggplot(revealed_work_arr_pct_u, aes(fill = work_arr, x = survey_year, y = percent)) + 
+  geom_bar(position="dodge", stat="identity") + ggtitle("Observed Distirbution of Work Arrangements by Year (Unweighted)") +
   xlab("Year") + ylab("Percent") + guides(fill=guide_legend(title="")) + theme(legend.position="right") +
-  geom_text(aes(label = round(percent, 2)), size = 3, vjust = -0.25, position = position_dodge(.9))
+  geom_text(aes(label = round(percent, 2)), size = 3, vjust = -0.25, position = position_dodge(.9)) + ylim(0, 1)
+#ggsave("./outputs/unweighted_work_arr_dist.jpg", width = 8, height = 6, units = "in")
 
-# Average Commute VMT by Work Arrangement -------------------------------------
+combined_plot <- p1 / p2 +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+combined_plot
+ggsave("./outputs/work_arr_dist.jpg", width = 8, height = 8, units = "in")
+
+# Average Work Tour VMT by Work Arrangement -------------------------------------
 ## Construct Data ----------------------------------------------------------
-vmt_df$day_num <- as.numeric(str_remove(vmt_df$day_num, "Day "))
-
-commuting_vmt <- vmt_df %>%
-  arrange(survey_year, person_id, day_num, depart_time) %>%
-  filter(o_purpose == "Went home" & d_purpose_category %in% c("Work"))
-
-## Merge Commute Data with Work Arrangement Data
-commuting_vmt <- commuting_vmt %>%
-  inner_join(work_arr)
-
-weighted_commute_vmt <- commuting_vmt %>%
+weighted_commute_vmt <- commute_vmt_weekly %>%
+  left_join(work_arr) %>%
   group_by(work_arr, survey_year) %>%
-  summarize(mean_commute_dist = weighted.mean(vmt, person_weight, na.rm = T))
+  summarize(w_mean_work_tour_vmt = weighted.mean(work_tour_vmt_weekly, person_weight, na.rm = T))
 
 weighted_commute_vmt$survey_year <- factor(weighted_commute_vmt$survey_year, c(2019, 2021, 2023))
 
-unweighted_commute_vmt <-  commuting_vmt %>%
+unweighted_commute_vmt <-  commute_vmt_weekly %>%
+  left_join(work_arr) %>%
   group_by(work_arr, survey_year) %>%
-  summarize(mean_commute_dist = mean(vmt, na.rm = T))
+  summarize(u_mean_work_tour_vmt = mean(work_tour_vmt_weekly, na.rm = T))
 
 unweighted_commute_vmt$survey_year <- factor(unweighted_commute_vmt$survey_year, c(2019, 2021, 2023))
 
 ## Plot Data ----------------------------------------------------------
-ggplot(weighted_commute_vmt, aes(fill = work_arr, x = survey_year, y = mean_commute_dist)) + 
-  geom_bar(position="dodge", stat="identity") + ggtitle("Average Commute VMT by Work Arrangement (Weighted)") +
+ggplot(weighted_commute_vmt, aes(fill = work_arr, x = survey_year, y = w_mean_work_tour_vmt)) + 
+  geom_bar(position="dodge", stat="identity") + ggtitle("Average Weekly Total Work Tour VMT by Work Arrangement (Weighted)") +
   xlab("Year") + ylab("VMT") + guides(fill=guide_legend(title="")) + theme(legend.position="bottom") +
-  geom_text(aes(label = round(mean_commute_dist, 2)), size = 3, vjust = -0.25, position = position_dodge(.9))
+  geom_text(aes(label = round(w_mean_work_tour_vmt, 2)), size = 3, vjust = -0.25, position = position_dodge(.9))
+#ggsave("./outputs/weighted_weekly_work_tour_vmt.jpg", width = 8, height = 6, units = "in")
 
-ggplot(unweighted_commute_vmt, aes(fill = work_arr, x = survey_year, y = mean_commute_dist)) + 
-  geom_bar(position="dodge", stat="identity") + ggtitle("Average Commute VMT by Work Arrangement (Unweighted)") +
+ggplot(unweighted_commute_vmt, aes(fill = work_arr, x = survey_year, y = u_mean_work_tour_vmt)) + 
+  geom_bar(position="dodge", stat="identity") + ggtitle("Average Weekly Total Work Tour VMT by Work Arrangement (Unweighted)") +
   xlab("Year") + ylab("VMT") + guides(fill=guide_legend(title="")) + theme(legend.position="bottom") +
-  geom_text(aes(label = round(mean_commute_dist, 2)), size = 3, vjust = -0.25, position = position_dodge(.9))
+  geom_text(aes(label = round(u_mean_work_tour_vmt, 2)), size = 3, vjust = -0.25, position = position_dodge(.9))
+#ggsave("./outputs/weighted_weekly_work_tour_vmt.jpg", width = 8, height = 6, units = "in")
 
-# Average Weekly Commute VMT by Work Arrangement -----------------------------------
-## Construct Data ----------------------------------------------------------
-vmt_commute_weekly <- work_arr %>%
-  inner_join(vmt_df, c("person_id", "survey_year")) %>%
-  filter(o_purpose == "Went home" & d_purpose_category %in% c("Work")) %>%
-  group_by(person_id, work_arr, person_weight, survey_year) %>%
-  summarize(vmt_commute_weekly = sum(vmt)) %>%
-  group_by(survey_year, work_arr) %>%
-  summarize(vmt_commute_weekly_w = weighted.mean(vmt_commute_weekly, person_weight, na.rm = T),
-            vmt_commute_weekly_u = mean(vmt_commute_weekly, na.rm = T))
 
-vmt_commute_weekly$survey_year <- factor(vmt_commute_weekly$survey_year, c(2019, 2021, 2023))
+# Average Weekly Total VMT (Work/Non-Work) by Work Arrangement ------------
+vmt_weekly$nonwork_tour_weekly_vmt <- vmt_weekly$weekly_vmt - vmt_weekly$work_tour_vmt_weekly
 
-## Plot Data ---------------------------------------------------------------
-ggplot(vmt_commute_weekly, aes(fill = work_arr, x = survey_year, y = vmt_commute_weekly_w)) + 
-  geom_bar(position="dodge", stat="identity") + ggtitle("Average Weekly Total Commute VMT by Work Arrangement (Weighted)") +
-  xlab("Year") + ylab("VMT") + guides(fill=guide_legend(title="")) + theme(legend.position="bottom") +
-  geom_text(aes(label = round(vmt_commute_weekly_w, 2)), size = 3, vjust = -0.25, position = position_dodge(0.9))
+## Weighted ------------
+vmt_weekly_work_nonwork_w <- vmt_weekly %>%
+  group_by(work_arr, survey_year) %>%
+  summarize(work_vmt = weighted.mean(work_tour_vmt_weekly, person_weight),
+            nonwork_vmt = weighted.mean(nonwork_tour_weekly_vmt, person_weight)) %>%
+  gather(key = vmt_type, value = weekly_vmt, work_vmt:nonwork_vmt)
 
-ggplot(vmt_commute_weekly, aes(fill = work_arr, x = survey_year, y = vmt_commute_weekly_u)) + 
-  geom_bar(position="dodge", stat="identity") + ggtitle("Average Weekly Total Commute VMT by Work Arrangement (Unweighted)") +
-  xlab("Year") + ylab("VMT") + guides(fill=guide_legend(title="")) + theme(legend.position="bottom") +
-  geom_text(aes(label = round(vmt_commute_weekly_u, 2)), size = 3, vjust = -0.25, position = position_dodge(0.9))
+vmt_weekly_work_nonwork_w$vmt_type <- ifelse(vmt_weekly_work_nonwork_w$vmt_type == "work_vmt", "Work VMT", "Non-Work VMT")
+vmt_weekly_work_nonwork_w$survey_year <- factor(vmt_weekly_work_nonwork_w$survey_year, c(2019, 2021, 2023))
+
+p1 <- ggplot(vmt_weekly_work_nonwork_w, aes(fill = work_arr, x = survey_year, y = weekly_vmt, pattern = vmt_type)) + 
+  geom_bar_pattern(position="dodge", stat="identity", pattern_fill = "black", # color of the pattern itself
+                   pattern_colour = "black", # border color of the pattern
+                   pattern_density = 0.01, # density of the pattern
+                   pattern_spacing = 0.01, # spacing between pattern elements
+                   pattern_angle = 45) +
+  scale_pattern_manual(values = c(NA, "stripe")) + xlab("Year") + ylab("Average Weekly Total VMT") +
+  ggtitle("Average Weekly Total VMT by Work Arrangement (Weighted)") +
+  guides(fill = guide_legend(title = "Work Arrangement", 
+    override.aes = list(
+      pattern = c("none", "none", "none") # "none" for Category A, others retain patterns
+    )
+  ), pattern = guide_legend("VMT Type",
+                            override.aes = list(fill = c("lightgrey", "lightgrey")))) +
+  geom_text(aes(label = round(weekly_vmt, 2)), size = 2.5, vjust = -0.25, position = position_dodge(.9))
+
+## Unweighted --------------------------------------------------------------
+vmt_weekly_work_nonwork_u <- vmt_weekly %>%
+  group_by(work_arr, survey_year) %>%
+  summarize(work_vmt = mean(work_tour_vmt_weekly),
+            nonwork_vmt = mean(nonwork_tour_weekly_vmt)) %>%
+  gather(key = vmt_type, value = weekly_vmt, work_vmt:nonwork_vmt)
+
+vmt_weekly_work_nonwork_u$vmt_type <- ifelse(vmt_weekly_work_nonwork_u$vmt_type == "work_vmt", "Work VMT", "Non-Work VMT")
+vmt_weekly_work_nonwork_u$survey_year <- factor(vmt_weekly_work_nonwork_u$survey_year, c(2019, 2021, 2023))
+
+p2 <- ggplot(vmt_weekly_work_nonwork_u, aes(fill = work_arr, x = survey_year, y = weekly_vmt, pattern = vmt_type)) + 
+  geom_bar_pattern(position="dodge", stat="identity", pattern_fill = "black", # color of the pattern itself
+                   pattern_colour = "black", # border color of the pattern
+                   pattern_density = 0.01, # density of the pattern
+                   pattern_spacing = 0.01, # spacing between pattern elements
+                   pattern_angle = 45) +
+  scale_pattern_manual(values = c(NA, "stripe")) + xlab("Year") + ylab("Average Weekly Total VMT") +
+  ggtitle("Average Weekly Total VMT by Work Arrangement (Unweighted)") +
+  guides(fill = guide_legend(title = "Work Arrangement", 
+                             override.aes = list(
+                               pattern = c("none", "none", "none") # "none" for Category A, others retain patterns
+                             )
+  ), pattern = guide_legend("VMT Type",
+                            override.aes = list(fill = c("lightgrey", "lightgrey")))) +
+  geom_text(aes(label = round(weekly_vmt, 2)), size = 2.5, vjust = -0.25, position = position_dodge(.9))
+
+
+## Stack ------------------------------------------------------------
+combined_plot <- p1 / p2 +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+combined_plot
+ggsave("./outputs/weekly_total_vmt.jpg", width = 10, height = 8, units = "in")
 
 
 # Average Weekly Total VMT by Work Arrangement and Purpose -------------------
@@ -427,6 +516,7 @@ for(i in c(2019, 2021, 2023)){
           xlab("Work Arrangement") + ylab("VMT") + guides(fill="none") +
           geom_text(aes(label = paste0(d_purpose_category, " (", round(vmt_weekly_w, 1), ")")), size = 2.5, vjust = -0.25, angle = 90, hjust = -0.05, position = position_dodge(0.9)) +
           ylim(0, 60))
+  ggsave(paste0("./outputs/w_weekly_total_vmt_purpose_work_arr_", i, ".jpg"), width = 8, height = 6, units = "in")
 }
 
 for(i in c(2019, 2021, 2023)){
@@ -435,6 +525,7 @@ for(i in c(2019, 2021, 2023)){
           xlab("Work Arrangement") + ylab("VMT") + guides(fill="none") +
           geom_text(aes(label = paste0(d_purpose_category, " (", round(vmt_weekly_u, 1), ")")), size = 2.5, vjust = -0.25, angle = 90, hjust = -0.05, position = position_dodge(0.9)) +
           ylim(0, 60))
+  ggsave(paste0("./outputs/u_weekly_total_vmt_purpose_work_arr_", i, ".jpg"), width = 8, height = 6, units = "in")
 }
 
 # Work Arrangements by Employment Status --------------------------------------
