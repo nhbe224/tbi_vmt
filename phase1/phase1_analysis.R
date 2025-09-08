@@ -33,7 +33,7 @@ trip_complete <- linkedtrip_all %>%
   filter(n_distinct(day_num) == 7) %>% ## Filters for people with 7 days
   left_join(person_all) %>%
   arrange(person_id) %>% 
-  select(hh_id, person_id, survey_year, linked_trip_id, o_purpose, d_purpose, mode_type, participate, day_num,participation_group) %>%
+  select(hh_id, person_id, survey_year, linked_trip_id, o_purpose, d_purpose, mode_type, participate, day_num, depart_dow, participation_group) %>%
   filter(participation_group %in% c("rMove recruit, rMove diary", "Online or call center recruit, rMove diary") |
          participate == "Yes") ## People with rMove Diary
 
@@ -64,19 +64,24 @@ trip_step3 <- trip_step2 %>%
   select(person_id, survey_year, day_num, telework_time, work_trip_made, employment, job_type) %>%
   distinct()
 
-## Convert Day Number to numeric
+
+## Convert day Number to numeric
 trip_step3$day_num <- as.numeric(str_remove(trip_step3$day_num, "Day "))
 
 trip_step3 <- trip_step3 %>%
   arrange(survey_year, person_id, day_num)
 
-work_arr <- trip_step3 %>%
+work_arr_daily <- trip_step3 %>%
   arrange(survey_year, person_id, day_num) %>%
   mutate(work_arr_day = case_when(telework_time <= twork_limit_daily & work_trip_made == 1 ~ "in_person_day",
                               telework_time > twork_limit_daily & work_trip_made == 1  ~ "hybrid_day",
                               telework_time > twork_limit_daily & work_trip_made == 0  ~ "remote_day",
                               telework_time <= twork_limit_daily & work_trip_made == 0 ~ "no_work_day")) %>% ## Part 1
-  select(person_id, survey_year, work_arr_day, employment, job_type) %>%
+  select(person_id, survey_year, work_arr_day, employment, job_type, day_num) 
+
+write.csv(work_arr_daily, "./outputs/work_arr_daily.csv", row.names = F)
+
+work_arr <- work_arr_daily %>%
   group_by(person_id, survey_year, work_arr_day, employment, job_type) %>%
   summarize(count = n()) %>%
   pivot_wider(names_from = work_arr_day, values_from = count) %>% 
@@ -128,17 +133,14 @@ work_arr_all <- work_arr
 work_arr <- work_arr_all %>%
   select(person_id, survey_year, work_arr)
 
-# Person Weight Reference Table -------------------------------------------
+## Person Weight Reference Table -------------------------------------------
 person_weights <- person_all %>%
   select(person_id, person_weight)
 
-# Weekly Weighted VMT ---------------------------------------------------------
-## Construct Data -------------------------------------------------------------
-## Combine Work Arrangement data with TBI Cleaned Data
 vmt_by_work_arr <- vmt_df %>%
   inner_join(work_arr, c("person_id", "survey_year"))
 
-# Get commute VMT --------------------------------------------------------
+## Get commute VMT --------------------------------------------------------
 commute_vmt <- vmt_by_work_arr %>%
   arrange(person_id, day_num, depart_time) %>%
   relocate(person_id, day_num, o_purpose_category, d_purpose_category)
@@ -149,7 +151,6 @@ commute_vmt <- commute_vmt %>%
   mutate(tour_id_count = if_else((person_id != lag(person_id)) | (day_num != lag(day_num)), 1, if_else((o_purpose_category %in% c('Home', 'Overnight')), 1, 0), missing = 1)) %>%
   relocate(person_id, day_num, tour_id_count)
 
-         
 commute_vmt <- commute_vmt %>%
   group_by(person_id, day_num) %>%
   mutate(tour_id = cumsum(tour_id_count)) %>%
@@ -180,13 +181,17 @@ commute_vmt_daily$survey_year <- factor(commute_vmt_daily$survey_year)
 write.csv(commute_vmt_daily, "./outputs/commute_vmt_daily.csv", row.names = F)
 
 commute_vmt_weekly <- commute_vmt %>%
-  select(person_id, work_tour, work_tour_vmt, person_weight) %>%
-  group_by(person_id, person_weight) %>%
+  select(person_id, survey_year, work_tour, work_tour_vmt, person_weight) %>%
+  group_by(person_id, survey_year, person_weight) %>%
   summarize(work_tour_vmt_weekly = sum(work_tour_vmt))
 
+## Join Commute VMT weekly -------------------------------------------------
 vmt_weekly <- vmt_by_work_arr %>%
   group_by(person_id, work_arr, person_weight, survey_year) %>%
   summarize(weekly_vmt = sum(vmt, na.rm = T))
+
+vmt_weekly <- vmt_weekly %>%
+  left_join(commute_vmt_weekly)
 
 ## Examine overnight people
 overnight <- linkedtrip_all %>%
@@ -210,25 +215,182 @@ overnight <- overnight %>%
 vmt_weekly <- vmt_weekly %>%
   filter(!person_id %in% overnight_ids)
 
-vmt_weekly <- vmt_weekly %>%
-  left_join(average_commute_vmt)
-
 ## Write out data
 write.csv(vmt_weekly, "./outputs/vmt_weekly.csv", row.names = F)
 
-## Plot Data -------------------------------------------------------------
-## Weekly VMT by Work Arrangement (weighted by person)
-weighted_vmt_weekly <- vmt_weekly %>%
-  group_by(work_arr, survey_year) %>% 
-  summarize(mean_weekly_vmt = weighted.mean(weekly_vmt, person_weight, na.rm = T),
-            median_weekly_vmt = weighted.median(weekly_vmt, person_weight, na.rm = T))
-print(weighted_vmt_weekly)
+# Summary Stats -----------------------------------------------------------
+## How many trips, how many people
+trip_complete$person_id <- as.numeric(trip_complete$person_id)
+vmt_weekly$person_id <- as.numeric(vmt_weekly$person_id)
+vmt_weekly_for_summary <- vmt_weekly %>%
+  left_join(trip_complete)
 
-## Weekly VMT by Work Arrangement (unweighted)
-unweighted_vmt_weekly <- vmt_weekly %>%
-  group_by(work_arr, survey_year) %>% 
-  summarize(mean_weekly_vmt = mean(weekly_vmt, na.rm = T),
-            median_weekly_vmt = median(weekly_vmt, person_weight, na.rm = T))
+length(unique(vmt_weekly_for_summary$person_id))
+rm(vmt_weekly_for_summary)
+
+# Displacement ------------------------------------------------------------
+vmt_df$person_id <- as.numeric(vmt_df$person_id)
+work_arr_daily$person_id <- as.numeric(work_arr_daily$person_id)
+work_arr_daily_join <- work_arr_daily %>% select(person_id, survey_year,work_arr_day,employment, )
+vmt_weekly$survey_year <- factor(vmt_weekly$survey_year)
+work_arr_daily$survey_year <- factor(work_arr_daily$survey_year)
+
+## Join weekly VMT data with daily data (work VMT and non work VMT)
+displacement_step1 <- vmt_weekly %>%
+  left_join(commute_vmt_daily) %>%
+  mutate(total_vmt_daily = work_tour_vmt_daily + nonwork_tour_vmt_daily)
+
+## Then, get the day arrangement
+displacement_step2 <- displacement_step1 %>%
+  left_join(work_arr_daily) %>%
+  relocate(person_id, work_arr_day, work_arr, travel_dow, total_vmt_daily, 
+           work_tour_vmt_daily, nonwork_tour_vmt_daily)
+
+displacement_step2$travel_dow <- factor(displacement_step2$travel_dow, 
+                          levels = c("Sunday", "Monday", "Tuesday", "Wednesday", 
+                                     "Thursday", "Friday", "Saturday"),
+                          ordered = TRUE)
+
+displacement_step2 <- displacement_step2 %>%
+  arrange(person_id, travel_dow)
+
+## 2023 Displacement Measures for AIP  ------------------------
+displacement_2023 <- displacement_step2 %>%
+  filter(survey_year == 2023)
+
+## Get Day Arrangement Percentages
+displacement_aip2023 <- displacement_2023 %>%
+  filter(work_arr == "Always In-Person") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(weighted_sum = sum(person_weight)) %>%
+  group_by(travel_dow) %>%
+  mutate(pct = weighted_sum / sum(weighted_sum)) %>%
+  select(-weighted_sum)
+
+displacement_aip2023_day_arr <- spread(displacement_aip2023, travel_dow, pct)
+displacement_aip2023_day_arr[is.na(displacement_aip2023_day_arr)] <- 0
+write.csv(displacement_aip2023_day_arr, "./outputs/displacement_aip2023_day_arr.csv", row.names = F)
+
+## Get Mean Daily VMT
+displacement_aip2023 <- displacement_2023 %>%
+  filter(work_arr == "Always In-Person") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(mean_vmt_daily = weighted.mean(total_vmt_daily, person_weight))
+
+displacement_aip2023_mean <- spread(displacement_aip2023, travel_dow, mean_vmt_daily)
+displacement_aip2023_mean[is.na(displacement_aip2023_mean)] <- 0
+write.csv(displacement_aip2023_mean, "./outputs/displacement_aip2023_mean_total_vmt.csv", row.names = F)
+
+## Get Mean Daily Work VMT
+displacement_aip2023 <- displacement_2023 %>%
+  filter(work_arr == "Always In-Person") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(work_tour_vmt_daily = weighted.mean(work_tour_vmt_daily, person_weight))
+
+displacement_aip2023_work <- spread(displacement_aip2023, travel_dow, work_tour_vmt_daily)
+displacement_aip2023_work[is.na(displacement_aip2023_work)] <- 0
+write.csv(displacement_aip2023_work, "./outputs/displacement_aip2023_work_vmt.csv", row.names = F)
+
+## Get Total Daily Non-Work VMT
+displacement_aip2023 <- displacement_2023 %>%
+  filter(work_arr == "Always In-Person") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(nonwork_tour_vmt_daily = weighted.mean(nonwork_tour_vmt_daily, person_weight))
+
+displacement_aip2023_nonwork <- spread(displacement_aip2023, travel_dow, nonwork_tour_vmt_daily)
+displacement_aip2023_nonwork[is.na(displacement_aip2023_nonwork)] <- 0
+write.csv(displacement_aip2023_nonwork, "./outputs/displacement_aip2023_nonwork_vmt.csv", row.names = F)
+
+## 2023 Displacement Measures for Hybrid  ------------------------
+## Get Day Arrangement Percentages
+displacement_hybrid2023 <- displacement_2023 %>%
+  filter(work_arr == "Hybrid") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(weighted_sum = sum(person_weight)) %>%
+  group_by(travel_dow) %>%
+  mutate(pct = weighted_sum / sum(weighted_sum)) %>%
+  select(-weighted_sum)
+
+displacement_hybrid2023_day_arr <- spread(displacement_hybrid2023, travel_dow, pct)
+displacement_hybrid2023_day_arr[is.na(displacement_hybrid2023_day_arr)] <- 0
+write.csv(displacement_hybrid2023_day_arr, "./outputs/displacement_hybrid2023_day_arr.csv", row.names = F)
+
+## Get Total Daily VMT
+displacement_hybrid2023 <- displacement_2023 %>%
+  filter(work_arr == "Hybrid") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(mean_vmt_daily = weighted.mean(total_vmt_daily, person_weight))
+
+displacement_hybrid2023_mean <- spread(displacement_hybrid2023, travel_dow, mean_vmt_daily)
+displacement_hybrid2023_mean[is.na(displacement_hybrid2023_mean)] <- 0
+write.csv(displacement_hybrid2023_total, "./outputs/displacement_hybrid2023_mean_vmt.csv", row.names = F)
+
+## Get Total Daily Work VMT
+displacement_hybrid2023 <- displacement_2023 %>%
+  filter(work_arr == "Hybrid") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(work_tour_vmt_daily = weighted.mean(work_tour_vmt_daily, person_weight))
+
+displacement_hybrid2023_work <- spread(displacement_hybrid2023, travel_dow, work_tour_vmt_daily)
+displacement_hybrid2023_work[is.na(displacement_hybrid2023_work)] <- 0
+write.csv(displacement_hybrid2023_work, "./outputs/displacement_hybrid2023_work_vmt.csv", row.names = F)
+
+## Get Total Daily Non-Work VMT
+displacement_hybrid2023 <- displacement_2023 %>%
+  filter(work_arr == "Hybrid") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(nonwork_tour_vmt_daily = weighted.mean(nonwork_tour_vmt_daily, person_weight))
+
+displacement_hybrid2023_nonwork <- spread(displacement_hybrid2023, travel_dow, nonwork_tour_vmt_daily)
+displacement_hybrid2023_nonwork[is.na(displacement_hybrid2023_nonwork)] <- 0
+write.csv(displacement_hybrid2023_nonwork, "./outputs/displacement_hybrid2023_nonwork_vmt.csv", row.names = F)
+
+## 2023 Displacement Measures for Always Remote
+## Get Day Arrangement Percentages
+displacement_ar2023 <- displacement_2023 %>%
+  filter(work_arr == "Always Remote") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(weighted_sum = sum(person_weight)) %>%
+  group_by(travel_dow) %>%
+  mutate(pct = weighted_sum / sum(weighted_sum)) %>%
+  select(-weighted_sum)
+
+displacement_ar2023_day_arr <- spread(displacement_ar2023, travel_dow, pct)
+displacement_ar2023_day_arr[is.na(displacement_ar2023_day_arr)] <- 0
+write.csv(displacement_ar2023_day_arr, "./outputs/displacement_ar2023_day_arr.csv", row.names = F)
+
+## Get Total Daily VMT
+displacement_ar2023 <- displacement_2023 %>%
+  filter(work_arr == "Always Remote") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(mean_vmt_daily = weighted.mean(total_vmt_daily, person_weight))
+
+displacement_ar2023_mean <- spread(displacement_ar2023, travel_dow, mean_vmt_daily)
+displacement_ar2023_mean[is.na(displacement_ar2023_mean)] <- 0
+write.csv(displacement_ar2023_mean, "./outputs/displacement_ar2023_mean_vmt.csv", row.names = F)
+
+## Get Total Daily Work VMT
+displacement_ar2023 <- displacement_2023 %>%
+  filter(work_arr == "Always Remote") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(work_tour_vmt_daily = weighted.mean(work_tour_vmt_daily, person_weight))
+
+displacement_ar2023_work <- spread(displacement_ar2023, travel_dow, work_tour_vmt_daily)
+displacement_ar2023_work[is.na(displacement_ar2023_work)] <- 0
+write.csv(displacement_ar2023_work, "./outputs/displacement_ar2023_work_vmt.csv", row.names = F)
+
+## Get Total Daily Non-Work VMT
+displacement_ar2023 <- displacement_2023 %>%
+  filter(work_arr == "Always Remote") %>%
+  group_by(travel_dow, work_arr_day) %>%
+  summarize(nonwork_tour_vmt_daily = weighted.mean(nonwork_tour_vmt_daily, person_weight))
+
+displacement_ar2023_nonwork <- spread(displacement_ar2023, travel_dow, nonwork_tour_vmt_daily)
+displacement_ar2023_nonwork[is.na(displacement_ar2023_nonwork)] <- 0
+write.csv(displacement_ar2023_nonwork, "./outputs/displacement_ar2023_nonwork_vmt.csv", row.names = F)
+
+
+# Plot Data -------------------------------------------------------------
 weighted_vmt_weekly$survey_year <- factor(weighted_vmt_weekly$survey_year, c(2019, 2021, 2023))
 
 ggplot(weighted_vmt_weekly, aes(fill = work_arr, x = survey_year, y = mean_weekly_vmt)) + 
@@ -249,7 +411,6 @@ ggsave("./outputs/unweighted_weekly_vmt.jpg", width = 8, height = 6, units = "in
 
 
 # Rebound Effects ---------------------------------------------------------
-# Rebound Effects ---------------------------------------------------------
 ### Always remote: 140.96-4.69 = 133.31 savings in mean work VMT
 ### Always remote: 138-64.3 = 73.7 increase in mean non work VMT
 ### rebound effect 73.1/133.1 = 55% rebound effect. Net savings overall.
@@ -259,29 +420,46 @@ ggsave("./outputs/unweighted_weekly_vmt.jpg", width = 8, height = 6, units = "in
 ### Rebound effect = 48% rebound effect
 
 mean_vmt_purpose_arr <- vmt_weekly %>%
-  group_by(work_arr, survey_year) %>%
-  summarize(mean_work_tour_vmt = mean(work_tour_vmt_weekly, na.rm = T),
-            mean_nonwork_tour_vmt = mean(weekly_vmt - work_tour_vmt_weekly, na.rm = T))
+  group_by(work_arr) %>%
+  summarize(mean_weekly_vmt = weighted.mean(weekly_vmt, person_weight, na.rm = T),
+            mean_work_tour_vmt = weighted.mean(work_tour_vmt_weekly, person_weight, na.rm = T),
+            mean_nonwork_tour_vmt = weighted.mean(weekly_vmt - work_tour_vmt_weekly, person_weight, na.rm = T))
 
 mean_vmt_aip <- mean_vmt_purpose_arr %>%
   filter(work_arr == "Always In-Person")
 
-mean_vmt_purpose_arr <- mean_vmt_purpose_arr %>%
+mean_vmt_not_aip <- mean_vmt_purpose_arr %>%
   filter(work_arr != "Always In-Person")
 
 ## Create always in-person dataframe to get rebound effects.
 mean_vmt_aip <- rbind(mean_vmt_aip, mean_vmt_aip)
-mean_vmt_aip[c(1:3), 1] <- "Always Remote"
-mean_vmt_aip[c(4:6), 1] <- "Hybrid"
-colnames(mean_vmt_aip)[c(3:4)] <- c("aip_mean_work_tour_vmt", "aip_mean_nonwork_tour_vmt")
+mean_vmt_aip[c(1), 1] <- "Always Remote"
+mean_vmt_aip[c(2), 1] <- "Hybrid"
+colnames(mean_vmt_aip)[c(2:4)] <- c("aip_mean_weekly_vmt", "aip_mean_work_tour_vmt", "aip_mean_nonwork_tour_vmt")
 
 ## Rebound effect dataframe
-rebound_effect <- mean_vmt_purpose_arr %>% inner_join(mean_vmt_aip) %>%
+rebound_effect <- mean_vmt_not_aip %>% inner_join(mean_vmt_aip) %>%
+  mutate(total_vmt_change = round(mean_weekly_vmt - aip_mean_weekly_vmt),
+         total_vmt_pct_change = round((mean_weekly_vmt - aip_mean_weekly_vmt) / (aip_mean_weekly_vmt), 2),
+         work_vmt_pct_change = round((mean_work_tour_vmt - aip_mean_work_tour_vmt ) / (aip_mean_work_tour_vmt), 2),
+         nonwork_vmt_pct_change = round((mean_nonwork_tour_vmt - aip_mean_nonwork_tour_vmt) / (aip_mean_nonwork_tour_vmt), 2),
+         work_vmt_savings = aip_mean_work_tour_vmt - mean_work_tour_vmt,
+         nonwork_vmt_increase = mean_nonwork_tour_vmt - aip_mean_nonwork_tour_vmt,
+         rebound_effect = round((nonwork_vmt_increase / work_vmt_savings), 2)) %>%
+  select(work_arr, total_vmt_pct_change, work_vmt_pct_change, nonwork_vmt_pct_change, rebound_effect) %>%
+  arrange(desc(work_arr))
+write.csv(rebound_effect, "./outputs/rebound_effect.csv", row.names = F)
+
+rebound_effect_underlying_math = mean_vmt_not_aip %>% inner_join(mean_vmt_aip) %>%
   mutate(work_vmt_savings = aip_mean_work_tour_vmt - mean_work_tour_vmt,
          nonwork_vmt_increase = mean_nonwork_tour_vmt - aip_mean_nonwork_tour_vmt,
-         rebound_effect = nonwork_vmt_increase / work_vmt_savings) %>%
-  select(work_arr, survey_year, work_vmt_savings, nonwork_vmt_increase, rebound_effect) %>%
-  arrange(survey_year, work_arr)
+         rebound_effect = round((nonwork_vmt_increase / work_vmt_savings), 2)) %>%
+  select(work_arr, survey_year, aip_mean_work_tour_vmt, mean_work_tour_vmt, work_vmt_savings, 
+         mean_nonwork_tour_vmt, aip_mean_nonwork_tour_vmt, nonwork_vmt_increase, rebound_effect) %>%
+  arrange(survey_year, desc(work_arr)) %>% 
+  mutate_at(vars(aip_mean_work_tour_vmt, mean_work_tour_vmt, work_vmt_savings, 
+                 mean_nonwork_tour_vmt, aip_mean_nonwork_tour_vmt, nonwork_vmt_increase), funs(round(., 1)))
+write.csv(rebound_effect_underlying_math, "./outputs/rebound_effect_underlying_math.csv", row.names = F)
 
 # Trip-Level VMT Distribution ----------------------------------------------
 ## Construct Data ----------------------------------------------------------
@@ -375,9 +553,10 @@ revealed_work_arr_pct_w$survey_year <- factor(revealed_work_arr_pct_w$survey_yea
 
 p1 <-ggplot(revealed_work_arr_pct_w, aes(fill = work_arr, x = survey_year, y = percent)) + 
   geom_bar(position="dodge", stat="identity") + ggtitle("Observed Distirbution of Work Arrangements by Year (Weighted)") +
-  xlab("Year") + ylab("Percent") + guides(fill=guide_legend(title="")) + theme(legend.position="right") +
+  xlab("Year") + ylab("Percent") + guides(fill=guide_legend(title="Work Arrangement")) + theme(legend.position="right") +
   geom_text(aes(label = round(percent, 2)), size = 3, vjust = -0.25, position = position_dodge(.9)) + ylim(0, 1)
-#ggsave("./outputs/weighted_work_arr_dist.jpg", width = 8, height = 6, units = "in")
+p1
+ggsave("./outputs/weighted_work_arr_dist.jpg", width = 10, height = 6, units = "in")
 
 ## Unweighted
 stated_work_arr_pct_u$survey_year <- factor(stated_work_arr_pct_u$survey_year, c(2019, 2021, 2023))
@@ -437,8 +616,8 @@ vmt_weekly$nonwork_tour_weekly_vmt <- vmt_weekly$weekly_vmt - vmt_weekly$work_to
 ## Weighted ------------
 vmt_weekly_work_nonwork_w <- vmt_weekly %>%
   group_by(work_arr, survey_year) %>%
-  summarize(work_vmt = weighted.mean(work_tour_vmt_weekly, person_weight),
-            nonwork_vmt = weighted.mean(nonwork_tour_weekly_vmt, person_weight)) %>%
+  summarize(work_vmt = weighted.mean(work_tour_vmt_weekly, person_weight, na.rm = T),
+            nonwork_vmt = weighted.mean(nonwork_tour_weekly_vmt, person_weight, na.rm = T)) %>%
   gather(key = vmt_type, value = weekly_vmt, work_vmt:nonwork_vmt)
 
 vmt_weekly_work_nonwork_w$vmt_type <- ifelse(vmt_weekly_work_nonwork_w$vmt_type == "work_vmt", "Work VMT", "Non-Work VMT")
@@ -451,14 +630,18 @@ p1 <- ggplot(vmt_weekly_work_nonwork_w, aes(fill = work_arr, x = survey_year, y 
                    pattern_spacing = 0.01, # spacing between pattern elements
                    pattern_angle = 45) +
   scale_pattern_manual(values = c(NA, "stripe")) + xlab("Year") + ylab("Average Weekly Total VMT") +
-  ggtitle("Average Weekly Total VMT by Work Arrangement (Weighted)") +
+  ggtitle("Average Weekly Total VMT by Work Arrangement and VMT Type (Weighted)") +
   guides(fill = guide_legend(title = "Work Arrangement", 
     override.aes = list(
       pattern = c("none", "none", "none") # "none" for Category A, others retain patterns
     )
   ), pattern = guide_legend("VMT Type",
                             override.aes = list(fill = c("lightgrey", "lightgrey")))) +
-  geom_text(aes(label = round(weekly_vmt, 2)), size = 2.5, vjust = -0.25, position = position_dodge(.9))
+  geom_text(aes(label = round(weekly_vmt, 1)), size = 2.5, vjust = -0.25, position = position_dodge(.9))
+
+p1
+ggsave("./outputs/mean_weekly_work_nonwork_vmt_w.jpg", width = 10, height = 6, units = "in")
+
 
 ## Unweighted --------------------------------------------------------------
 vmt_weekly_work_nonwork_u <- vmt_weekly %>%

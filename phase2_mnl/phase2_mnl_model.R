@@ -1,22 +1,16 @@
 ### Phase 2 MNL for TBI VMT Project
 # Set Working Directory ---------------------------------------------------
-setwd("D:/neeco/thesis/tbi_vmt/phase2/")
+setwd("D:/neeco/thesis/tbi_vmt/phase2_mnl/")
 
 # Load Packages -----------------------------------------------------------
-library(tidyverse)
-library(data.table)
-library(spatstat)
-library(gridExtra)
-library(grid)
-library(gtable)
-library(stringi)
+packages_vector <- c("tidyverse", "sf", "tigris", "tidycensus", "data.table", 
+                     "janitor", "tools", "spatstat", "gridExtra", "grid", "gtable",
+                     "stringi", "nnet", "plm", "forcats", "modelsummary", 
+                     "foreign", "stargazer")
+need_to_install <- packages_vector[!(packages_vector %in% installed.packages()[,"Package"])]
+if (length(need_to_install)) install.packages(need_to_install)
+lapply(packages_vector, library, character.only = TRUE)
 options(scipen = 999)
-require(nnet)
-library(sf)
-library(tigris)
-library(gtools)
-library(reshape2)
-library(stargazer)
 
 # Read Data ---------------------------------------------------------------
 ## Bring in cleaned weekly VMT data
@@ -24,7 +18,7 @@ vmt_weekly <- read.csv("../phase1/outputs/vmt_weekly.csv")
 
 ## Bring in person, household, day and trip data
 source("../datacleaning/getvmt.R")
-setwd("D:/neeco/thesis/tbi_vmt/phase2/")
+setwd("D:/neeco/thesis/tbi_vmt/phase2_mnl/")
 
 ## Bring in smart location database data
 sld2018 <- fread("D:/neeco/rdc_census/sld_change_file/outputs/sld_change_file2018.csv")
@@ -33,6 +27,12 @@ sld2018 <- fread("D:/neeco/rdc_census/sld_change_file/outputs/sld_change_file201
 mn_transit2021_load <- fread("D:/neeco/rdc_census/aaa_change_file/inputs/transit2021/Minnesota_27_transit_block_group_2021.csv")
 wi_transit2021_load <- fread("D:/neeco/rdc_census/aaa_change_file/inputs/transit2021/Wisconsin_55_transit_block_group_2021.csv")
 transit2021_load <- rbind(mn_transit2021_load, wi_transit2021_load)
+transitAll <- read.dta("D:/neeco/rdc_census/to_rdc/transit_ALL.dta")
+transitAll <- transitAll %>%
+  select(-threshold) %>%
+  filter(year %in% c(2019, 2021, 2022))
+## Proxy 2023 using 2022
+transitAll$year <- ifelse(transitAll$year == 2022, 2023, transitAll$year)
 
 ## Read gas prices
 mn_gas_prices_load <- read.csv("../inputs/mn_gas_prices.csv")
@@ -48,7 +48,7 @@ person_all$person_id <- as.numeric(person_all$person_id)
 ## Join on person variables that are relevant to VMT -----------------------
 ### First find the variables in person that are relevant to VMT
 person_keep <- person_all %>%
-  select(survey_year, person_id, hh_id, age, gender, employment, race, work_cbg_2010)
+  select(survey_year, person_id, person_weight, hh_id, age, gender, employment, education,  race, work_cbg_2010)
 
 ### Then join on VMT
 vmt_weekly_w_person <- vmt_weekly %>%
@@ -59,6 +59,7 @@ unique(vmt_weekly_w_person$age)
 unique(vmt_weekly_w_person$race) 
 unique(vmt_weekly_w_person$gender)
 unique(vmt_weekly_w_person$employment) 
+unique(vmt_weekly_w_person$education)
 
 ## Plot distributions before grouping
 ggplot(vmt_weekly_w_person, aes(x=age)) + geom_bar() + ggtitle("Distribution of Age Groups") +
@@ -73,6 +74,10 @@ ggplot(vmt_weekly_w_person, aes(x=employment)) + geom_bar() + ggtitle("Distribut
 
 ggplot(vmt_weekly_w_person, aes(x=race)) + geom_bar() + ggtitle("Distribution of Racial Groups") +
   xlab("Race") + ylab("Count") + theme(axis.text.x=element_text(size=6, angle = 20)) + 
+  geom_text(stat='count', aes(label=..count..), vjust=-0.2)
+
+ggplot(vmt_weekly_w_person, aes(x=education)) + geom_bar() + ggtitle("Distribution of Education") +
+  xlab("Education") + ylab("Count") + theme(axis.text.x=element_text(size=6, angle = 20)) + 
   geom_text(stat='count', aes(label=..count..), vjust=-0.2)
 
 ## Age group
@@ -101,6 +106,11 @@ vmt_weekly_w_person$gender <- factor(vmt_weekly_w_person$gender,
 ## Employment type
 vmt_weekly_w_person$employment <- factor(vmt_weekly_w_person$employment,
                                      levels = unique(unique(vmt_weekly_w_person$employment)))
+
+## Education
+vmt_weekly_w_person$education <- ifelse(vmt_weekly_w_person$education %in% c("Bachelor's degree", "Graduate/post-graduate degree"), "bach_plus", "no_bach_plus")
+vmt_weekly_w_person$education <- factor(vmt_weekly_w_person$education)
+vmt_weekly_w_person$education <- relevel(vmt_weekly_w_person$education, ref = "bach_plus")
 
 
 ## Join on household variables that are relevant to VMT -----------------------
@@ -166,17 +176,47 @@ vmt_weekly_w_hh <- vmt_weekly_w_hh %>%
 sld2018 <- sld2018 %>%
   select(bg2010, jobs_per_hh, emp8_ent, intersection_den)
 
-transit2021 <- transit2021_load %>%
-  filter(threshold == 1800) %>%
-  rename(transit_jobs30 = weighted_average) %>%
-  select(geoid, transit_jobs30) 
+# transit2021 <- transit2021_load %>%
+#   filter(threshold == 1800) %>%
+#   rename(transit_jobs30 = weighted_average) %>%
+#   select(geoid, transit_jobs30) 
 
 vmt_weekly_w_be <- vmt_weekly_w_hh %>%
   left_join(sld2018, by = c("home_bg_2010" = "bg2010"))
 
-vmt_weekly_w_be <- vmt_weekly_w_be %>%
-  left_join(transit2021, by = c("home_bg_2010" = "geoid"))
+# vmt_weekly_w_be <- vmt_weekly_w_be %>%
+#   left_join(transit2021, by = c("home_bg_2010" = "geoid"))
+vmt_weekly_w_be$home_bg_2010 <- as.character(vmt_weekly_w_be$home_bg_2010)
 
+vmt_weekly_w_be <- vmt_weekly_w_be %>%
+  left_join(transitAll, by = c("home_bg_2010" = "bg2010", "survey_year" = "year"))
+#rm(transitAll)
+
+vmt_weekly_w_be <- vmt_weekly_w_be %>%
+  rename(transit_jobs30 = jobs)
+
+### NA Values?
+# Get the home BG where transit jobs is NA, fill with previous years' values
+na_home_bg <- vmt_weekly_w_be[is.na(vmt_weekly_w_be$transit_jobs30), ]$home_bg_2010
+# # See if it's in the dataset
+vmt_weekly_w_be %>%
+  filter(home_bg_2010 %in% na_home_bg) %>%
+  select(transit_jobs30, survey_year, home_bg_2010)
+
+wi_transit <- wi_transit2021_load %>%
+  filter(geoid %in% c(550939604002, 550939607002),
+         threshold == 1800) %>%
+  select(geoid, weighted_average) %>%
+  mutate(geoid = as.character(geoid))
+
+vmt_weekly_w_be <- vmt_weekly_w_be %>%
+  left_join(wi_transit, by = c("home_bg_2010" = "geoid"))
+
+vmt_weekly_w_be$transit_jobs30 <- ifelse(is.na(vmt_weekly_w_be$transit_jobs30),
+                                         vmt_weekly_w_be$weighted_average, vmt_weekly_w_be$transit_jobs30)
+
+vmt_weekly_w_be <- vmt_weekly_w_be %>%
+  select(-weighted_average)
 
 ## Join on Economic Variables ----------------------------------------------
 ## Gas prices
@@ -216,7 +256,7 @@ vmt_weekly_for_model$income_detailed <- relevel(vmt_weekly_for_model$income_deta
 # Multinomial Logit Model -------------------------------------------------
 ## Full Model --------------------------------------------------------------
 mnl_model1 <- multinom(work_arr ~ age_group + gender + employment + race + 
-                          income_detailed + num_kids + num_vehicles + num_hybrid_or_remote +
+                          income_detailed + num_kids + gender:num_kids + education + num_vehicles + num_hybrid_or_remote +
                          jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 +year2021 +year2023,
                         data = vmt_weekly_for_model)
 
