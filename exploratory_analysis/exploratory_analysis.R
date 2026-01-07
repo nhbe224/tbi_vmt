@@ -62,14 +62,14 @@ work_arr_by_year_w <- vmt_weekly_df %>%
   ungroup()
   
 
-# Revised Plots -----------------------------------------------------------
+# Plot 1: Distribution of Work Arrangements by Year ----------------------
 ggplot(work_arr_by_year_w, aes(x = factor(survey_year), y = wtd_pct, fill = work_arr)) +
   geom_col(position = "stack", width = 0.5) + 
   geom_text(aes(label = wtd_pct_text),
             position = position_stack(vjust = 0.5),
             color = "white",
             size = 4,
-            fontface = "bold")+
+            fontface = "bold") +
   labs(title = "Observed Distribution of Work Arrangements by Year (Weighted)",
        x = "Year",
        y = "Percent",
@@ -78,7 +78,53 @@ ggplot(work_arr_by_year_w, aes(x = factor(survey_year), y = wtd_pct, fill = work
                                "Hybrid" = "darkmagenta", 
                                "Always Remote" = "darkorange1"))
 
-ggsave("./outputs/work_arr_by_year_w.jpg", width = 8, height = 6, units = "in")
+ggsave("./outputs/work_arr_by_year_w.jpg", width = 10, height = 6, units = "in")
+
+
+# Plot 2: VMT by Work Arrangement and VMT Type ----------------------------
+vmt_by_work_arr_vmt_type_w <- vmt_weekly_df %>%
+  group_by(work_arr, survey_year) %>%
+  summarize(work_vmt_weekly_wtd_mean = weighted.mean(work_tour_vmt_weekly, person_weight, na.rm = T),
+            nonwork_tour_vmt_weekly_wtd_mean = weighted.mean(nonwork_tour_vmt_weekly, person_weight, na.rm = T)) %>%
+  pivot_longer(cols = c(work_vmt_weekly_wtd_mean, nonwork_tour_vmt_weekly_wtd_mean),
+               names_to = "vmt_type",
+               values_to = "vmt") %>%
+  mutate(vmt_type = ifelse(vmt_type == "work_vmt_weekly_wtd_mean", "Work", "Non-Work"),
+         vmt_label = ifelse(vmt > 10, round(vmt, 0), NA))
+
+ggplot(vmt_by_work_arr_vmt_type_w, aes(x = factor(survey_year), y = vmt, fill = vmt_type)) +
+  geom_bar(stat = "identity", position = "stack") +
+  # Group the plot into separate panels for each category
+  facet_wrap(~ work_arr) +
+  
+  # Add the absolute value labels to the segments 
+  geom_text(
+    aes(label = vmt_label),
+    position = position_stack(vjust = 0.5), 
+    color = "white", 
+    size = 4,
+    fontface = "bold"
+  ) +
+  
+  # Customize labels and use theme_minimal()
+  labs(
+    title = "Average Weekly Total VMT by Work Arrangement and VMT Type (Weighted)",
+    x = "Year",
+    y = "VMT",
+    fill = "VMT Type"
+  ) +
+  theme(
+    # Set the style for the facet titles (category labels)
+    strip.text = element_text(
+      size = 12,      # Increase the font size
+      face = "bold"   # Make the text bold
+    )
+  ) +
+  scale_fill_manual(values = c("Non-Work" = "goldenrod3",
+                               "Work" = "navyblue"))
+  
+
+ggsave("./outputs/vmt_by_work_arr_vmt_type_w.jpg", width = 10, height = 6, units = "in")
 
 
 # Plot Mean Weekly VMT by Work Arrangement (weighted) ------------------------
@@ -108,7 +154,7 @@ ggsave("./outputs/unweighted_vmt_weekly.jpg", width = 8, height = 6, units = "in
 
 # Average Work Tour VMT by Work Arrangement -------------------------------------
 ## Construct Data ----------------------------------------------------------
-weighted_commute_vmt <- vmt_weekly_vmt %>%
+weighted_commute_vmt <- vmt_weekly_df %>%
   group_by(work_arr, survey_year) %>%
   summarize(w_mean_work_tour_vmt = weighted.mean(work_tour_vmt_weekly_df, person_weight, na.rm = T))
 

@@ -1,4 +1,4 @@
-### Datacleaning for TBI VMT
+### Data Cleaning for TBI VMT
 ### Inputs: Raw TBI Survey Data
 ### Outputs: VMT weekly, VMT daily, VMT for displacement
 # Set Working Directory ---------------------------------------------------
@@ -270,9 +270,6 @@ work_arr_daily <- trip_step3 %>%
                                   telework_time > twork_limit_daily & work_trip_made == 0  ~ "remote_day",
                                   telework_time <= twork_limit_daily & work_trip_made == 0 ~ "no_work_day")) %>% ## Part 1
   select(person_id, survey_year, work_arr_day, employment, job_type, day_num, telework_time)
-
-
-#write.csv(work_arr_daily, "./outputs/work_arr_daily.csv", row.names = F)
 
 work_arr <- work_arr_daily %>%
   group_by(person_id, survey_year, work_arr_day, employment, job_type) %>%
@@ -709,6 +706,13 @@ vmt_weekly_for_model$ln_vmt_weekly <- log(vmt_weekly_for_model$vmt_weekly + 1)
 vmt_weekly_for_model$ln_work_tour_vmt_weekly <- log(vmt_weekly_for_model$work_tour_vmt_weekly + 1)
 vmt_weekly_for_model$ln_nonwork_tour_vmt_weekly <- log(vmt_weekly_for_model$nonwork_tour_vmt_weekly + 1)
 
+## Relevel variables -------------------------------------------------------
+vmt_weekly_for_model$age_group <- relevel(vmt_weekly_for_model$age_group, ref = "35 to 54")
+vmt_weekly_for_model$income_detailed <- factor(vmt_weekly_for_model$income_detailed, 
+                                               c("<$50K", "$50-$100K", "$100-$150K", "$150-$200K", "$200K+", "Undisclosed"))
+vmt_weekly_for_model$income_detailed <- relevel(vmt_weekly_for_model$income_detailed, ref = "$50-$100K")
+
+## Join on travel times ----------------------------------------------------
 vmt_weekly_df <- vmt_weekly_for_model %>%
   left_join(travel_times_df) %>%
   relocate(person_id, work_arr, person_weight, survey_year, vmt_weekly, 
@@ -792,7 +796,7 @@ vmt_daily_model_mat_step1 <- model.matrix(~ person_id + person_weight +
                                             travel_dow + age_group + gender + 
                                             employment + education + race + 
                                             income_detailed + num_kids + 
-                                            num_vehicles + day_num, data = vmt_daily)
+                                            num_vehicles + day_num, data = vmt_daily_df)
 vmt_daily_model_mat_step1 <- vmt_daily_model_mat_step1[, -1]
 
 colnames(vmt_daily_model_mat_step1) <- c("person_id", "person_weight", "monday", 
@@ -806,7 +810,7 @@ colnames(vmt_daily_model_mat_step1) <- c("person_id", "person_weight", "monday",
                                          "hh_income_undisclosed", "kids_1plus", 
                                          "vehicle1","vehicle2plus", "day_num")
 
-vmt_daily_model_mat_step2 <-  vmt_daily %>%
+vmt_daily_model_mat_step2 <-  vmt_daily_df %>%
   select(-age_group, -travel_dow, -gender, -employment, -education, -race, 
          -income_detailed, -num_kids, -num_vehicles)
 
@@ -826,30 +830,137 @@ write.csv(vmt_daily_model_mat, "./outputs/vmt_daily_model_mat.csv", row.names = 
 
 
 # Displacement Dataframe --------------------------------------------------
-vmt_displacement <- vmt_daily %>%
+vmt_displacement_step1 <- vmt_daily_df %>%
   arrange(person_id, travel_dow) %>%
   relocate(person_id, travel_dow, nonwork_tour_vmt_daily, ln_nonwork_tour_vmt_daily, work_arr_day) %>%
-  mutate(work_arr_day = ifelse(work_arr_day == "hybrid_day", "in_person_day", work_arr_day)) %>%
+  mutate(work_arr_day = ifelse(work_arr_day == "hybrid_day", "in_person_day", work_arr_day)) 
+
+## First, get the number of in person, remote, and no work days for an individual person
+## Determine if it's a weekday
+vmt_displacement_all <- vmt_displacement_step1 %>%
+  relocate(person_id, work_arr_day) %>%
   group_by(person_id) %>%
-  mutate(work_arr_day_p1 = dplyr::lead(work_arr_day, n = 1),
-         work_arr_day_p2 = dplyr::lead(work_arr_day, n = 2),
-         work_arr_day_p3 = dplyr::lead(work_arr_day, n = 3),
-         work_arr_day_p4 = dplyr::lead(work_arr_day, n = 4),
-         work_arr_day_p5 = dplyr::lead(work_arr_day, n = 5),
-         work_arr_day_p6 = dplyr::lead(work_arr_day, n = 6),
-         work_arr_day_m1 = dplyr::lag(work_arr_day, n = 1),
-         work_arr_day_m2 = dplyr::lag(work_arr_day, n = 2),
-         work_arr_day_m3 = dplyr::lag(work_arr_day, n = 3),
-         work_arr_day_m4 = dplyr::lag(work_arr_day, n = 4),
-         work_arr_day_m5 = dplyr::lag(work_arr_day, n = 5),
-         work_arr_day_m6 = dplyr::lag(work_arr_day, n = 6)) %>%
-  relocate(person_id, travel_dow, work_arr_day_m6, work_arr_day_m5, work_arr_day_m4,
-           work_arr_day_m3, work_arr_day_m2, work_arr_day_m1, work_arr_day, work_arr_day_p1, work_arr_day_p2, 
-           work_arr_day_p3, work_arr_day_p4, work_arr_day_p5, work_arr_day_p6) %>%
-  ungroup()
+  mutate(n_in_person_day = sum(work_arr_day == "in_person_day"),
+         n_remote_day = sum(work_arr_day == "remote_day"),
+         n_no_work_day = sum(work_arr_day == "no_work_day"),
+         weekday = if_else(travel_dow %in% c("Sunday", "Saturday"), 0, 1),
+         weekend = if_else(travel_dow %in% c("Sunday", "Saturday"), 1, 0)) %>%
+  relocate(person_id, work_arr_day, n_in_person_day, n_remote_day, n_no_work_day, weekday)
+
+## Then, get the number of in person, remote, and no work days for weekdays only.
+vmt_displacement_weekdays <- vmt_displacement_all %>%
+  filter(weekday == 1) %>%
+  group_by(person_id) %>%
+  mutate(n_in_person_day_weekday = sum(work_arr_day == "in_person_day"),
+         n_remote_day_weekday = sum(work_arr_day == "remote_day"),
+         n_no_work_day_weekday = sum(work_arr_day == "no_work_day")) %>%
+  select(person_id, travel_dow, n_in_person_day_weekday, n_remote_day_weekday, n_no_work_day_weekday)
+
+## Get nonwork tour VMT for other days
+vmt_displacement_step2 <- vmt_displacement_all %>%
+  group_by(person_id) %>%
+  mutate(nonwork_tour_vmt_other_days = nonwork_tour_vmt_weekly - nonwork_tour_vmt_daily,
+         nonwork_tour_vmt_weekly_weekdays = ifelse(weekday == 1, sum(nonwork_tour_vmt_daily), 0),
+         nonwork_tour_vmt_other_days_weekdays = nonwork_tour_vmt_weekly_weekdays - nonwork_tour_vmt_daily*weekday,
+         nonwork_tour_vmt_daily_weekdays = nonwork_tour_vmt_daily * weekday,
+         nonwork_tour_vmt_daily_weekends = nonwork_tour_vmt_daily * weekend) %>%
+  ungroup() %>%
+  group_by(person_id) %>%
+  summarize(nonwork_tour_vmt_weekly_weekdays = sum(nonwork_tour_vmt_daily_weekdays),
+            nonwork_tour_vmt_weekly_weekends = sum(nonwork_tour_vmt_daily_weekends))
+
+vmt_displacement <- vmt_displacement_all %>%
+  left_join(vmt_displacement_weekdays) %>%
+  group_by(person_id) %>%
+  mutate(n_in_person_day_weekday = ifelse(is.na(n_in_person_day_weekday), max(n_in_person_day_weekday , na.rm = TRUE), n_in_person_day_weekday),
+         n_remote_day_weekday = ifelse(is.na(n_remote_day_weekday), max(n_remote_day_weekday , na.rm = TRUE), n_remote_day_weekday),
+         n_no_work_day_weekday = ifelse(is.na(n_no_work_day_weekday), max(n_no_work_day_weekday , na.rm = TRUE), n_no_work_day_weekday),
+         in_person_day = if_else(work_arr_day == "in_person_day", 1, 0),
+         remote_day = if_else(work_arr_day == "remote_day", 1, 0),
+         no_work_day = if_else(work_arr_day == "no_work_day", 1, 0),
+         n_other_in_person_days = n_in_person_day - in_person_day,
+         n_other_remote_days = n_remote_day - remote_day,
+         n_other_no_work_days = n_no_work_day - no_work_day,
+         n_other_in_person_days_weekday = n_in_person_day_weekday - in_person_day*weekday,
+         n_other_remote_days_weekday = n_remote_day_weekday - remote_day*weekday,
+         n_other_no_work_days_weekday = n_no_work_day_weekday - no_work_day*weekday) %>%
+  ungroup() %>%
+  left_join(vmt_displacement_step2) %>%
+  relocate(person_id, travel_dow, nonwork_tour_vmt_daily, nonwork_tour_vmt_weekly,
+           nonwork_tour_vmt_weekly_weekdays, nonwork_tour_vmt_weekly_weekends) %>%
+  mutate(nonwork_tour_vmt_other_weekdays = nonwork_tour_vmt_weekly_weekdays - nonwork_tour_vmt_daily*weekday,
+         nonwork_tour_vmt_other_weekends = nonwork_tour_vmt_weekly_weekends - nonwork_tour_vmt_daily*weekend) %>%
+  relocate(person_id, travel_dow, nonwork_tour_vmt_weekly_weekends, nonwork_tour_vmt_daily, nonwork_tour_vmt_other_weekends) 
+
+vmt_displacement$travel_dow <- factor(vmt_displacement$travel_dow, 
+                                      levels = c("Sunday", "Monday", "Tuesday",
+                                                 "Wednesday", "Thursday", "Friday",
+                                                 "Saturday"))
+
+vmt_displacement$travel_dow <- relevel(vmt_displacement$travel_dow, ref = "Wednesday")
+
+vmt_displacement$ln_nonwork_tour_vmt_other_all_days <- log(vmt_displacement$nonwork_tour_vmt_other_weekdays + 
+                                                          vmt_displacement$nonwork_tour_vmt_other_weekends + 1)
+
+vmt_displacement$ln_nonwork_tour_vmt_other_weekdays <- log(vmt_displacement$nonwork_tour_vmt_other_weekdays + 1)
+
+vmt_displacement <- vmt_displacement %>%
+  rename(vmt_today = vmt_daily,
+         work_tour_vmt_today = work_tour_vmt_daily,
+         nonwork_tour_vmt_today = nonwork_tour_vmt_daily,
+         ln_vmt_today = ln_vmt_daily,
+         ln_vmt_work_tour_today = ln_work_tour_vmt_daily,
+         ln_nonwork_tour_vmt_today = ln_nonwork_tour_vmt_daily)
+
+vmt_displacement <- vmt_displacement %>%
+  relocate(person_id, travel_dow, vmt_today, work_tour_vmt_today, nonwork_tour_vmt_today)
 
 ## Write out VMT displacement -------------------------------------------
 write.csv(vmt_displacement , "./outputs/vmt_daily_disp.csv", row.names = F)
 
+# Displacement Model Matrix (for OPSR) -------------------------------------
+vmt_displacement_mat_step1 <- model.matrix(~ person_id + person_weight + 
+                                            travel_dow + age_group + gender + 
+                                            employment + education + race + 
+                                            income_detailed + num_kids + 
+                                            num_vehicles + day_num, data = vmt_displacement)
+vmt_displacement_mat_step1 <- vmt_displacement_mat_step1[, -1]
 
+colnames(vmt_displacement_mat_step1) <- c("person_id", "person_weight", "sunday", "monday", 
+                                         "tuesday",  "thursday", 
+                                         "friday", "saturday", "age18to34", 
+                                         "age55plus", "male", 
+                                         "employed_part_time", "self_employed", 
+                                         "no_bach_plus", "nonWhite", 
+                                         "hh_income_under50", "hh_income100to150", 
+                                         "hh_income150to200", "hh_income_200plus", 
+                                         "hh_income_undisclosed", "kids_1plus", 
+                                         "vehicle1","vehicle2plus", "day_num")
+
+vmt_displacement_mat_step2 <-  vmt_displacement %>%
+  select(-age_group, -travel_dow, -gender, -employment, -education, -race, 
+         -income_detailed, -num_kids, -num_vehicles)
+
+vmt_displacement_mat <- vmt_displacement_mat_step2 %>%
+  inner_join(vmt_displacement_mat_step1, by = c("person_id", "person_weight", "day_num"), copy = T)
+
+vmt_displacement_mat$work_arr <- ifelse(vmt_displacement_mat$work_arr == "Always In-Person", 1,
+                                       ifelse(vmt_displacement_mat$work_arr == "Hybrid", 2, 3))
+
+vmt_displacement_mat <- vmt_displacement_mat[, !(names(vmt_displacement_mat) %in% c("hh_id", "num_workers"))]
+
+vmt_displacement_mat$work_arr_day <- ifelse(vmt_displacement_mat$work_arr_day == "in_person_day", 1,
+                                           ifelse(vmt_displacement_mat$work_arr_day == "remote_day", 2, 3))
+
+## Write out daily model matrix for OPSR --------------------------------
+write.csv(vmt_displacement_mat, "./outputs/vmt_daily_disp_mat.csv", row.names = F)
+
+
+# Write out .RData file ---------------------------------------------------
+vmt_files <- list(vmt_weekly_df, vmt_daily_df, vmt_weekly_model_mat, 
+                  vmt_daily_model_mat, vmt_displacement, vmt_displacement_mat)
+
+names(vmt_files) <- c("vmt_weekly_df", "vmt_daily_df", "vmt_weekly_model_mat",
+                      "vmt_daily_model_mat", "vmt_displacement", "vmt_displacement_mat")
+saveRDS(vmt_files, "./outputs/vmt_files.RData")
 

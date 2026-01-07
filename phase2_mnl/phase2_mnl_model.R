@@ -6,7 +6,7 @@ setwd("D:/neeco/thesis/tbi_vmt/phase2_mnl/")
 packages_vector <- c("tidyverse", "sf", "tigris", "tidycensus", "data.table", 
                      "janitor", "tools", "spatstat", "gridExtra", "grid", "gtable",
                      "stringi", "nnet", "plm", "forcats", "modelsummary", 
-                     "foreign", "stargazer")
+                     "foreign", "stargazer", "osrm")
 need_to_install <- packages_vector[!(packages_vector %in% installed.packages()[,"Package"])]
 if (length(need_to_install)) install.packages(need_to_install)
 lapply(packages_vector, library, character.only = TRUE)
@@ -53,6 +53,8 @@ person_keep <- person_all %>%
 ### Then join on VMT
 vmt_weekly_w_person <- vmt_weekly %>%
   left_join(person_keep) 
+
+## Summary stats ---------------
 
 ## Look at non-response/missing columns
 unique(vmt_weekly_w_person$age)
@@ -147,6 +149,9 @@ vmt_weekly_w_hh$num_kids <- as.numeric(substr(vmt_weekly_w_hh$num_kids, 1, 2))
 vmt_weekly_w_hh$num_adults <- as.numeric(substr(vmt_weekly_w_hh$num_adults, 1, 2))
 vmt_weekly_w_hh$num_vehicles <- as.numeric(substr(vmt_weekly_w_hh$num_vehicles, 1, 2))
 
+## Quick summary
+stargazer(vmt_weekly_w_hh)
+
 ## Create variable for number of additional teleworkers in household
 vmt_weekly_w_hh$hybrid_or_remote <- ifelse(vmt_weekly_w_hh$work_arr %in% c("Always Remote", "Hybrid"), 1, 0)
 vmt_weekly_w_hh <- vmt_weekly_w_hh %>%
@@ -195,7 +200,6 @@ vmt_weekly_w_be <- vmt_weekly_w_be %>%
 vmt_weekly_w_be <- vmt_weekly_w_be %>%
   rename(transit_jobs30 = jobs)
 
-### NA Values?
 # Get the home BG where transit jobs is NA, fill with previous years' values
 na_home_bg <- vmt_weekly_w_be[is.na(vmt_weekly_w_be$transit_jobs30), ]$home_bg_2010
 # # See if it's in the dataset
@@ -242,7 +246,7 @@ vmt_weekly_for_model$nonwork_tour_vmt_weekly <- vmt_weekly_for_model$weekly_vmt 
 vmt_weekly_for_model <- vmt_weekly_for_model %>%
   relocate(person_id, work_arr, survey_year, weekly_vmt, work_tour_vmt_weekly, nonwork_tour_vmt_weekly)
 
-write.csv(vmt_weekly_for_model, "./outputs/vmt_weekly_for_model.csv", row.names = F)
+#write.csv(vmt_weekly_for_model, "./outputs/vmt_weekly_for_model.csv", row.names = F)
 
 
 # Relevel -----------------------------------------------------------------
@@ -251,55 +255,71 @@ vmt_weekly_for_model$income_detailed <- factor(vmt_weekly_for_model$income_detai
                                               c("<$50K", "$50-$100K", "$100-$150K", "$150-$200K", "$200K+", "Undisclosed"))
 vmt_weekly_for_model$income_detailed <- relevel(vmt_weekly_for_model$income_detailed, ref = "$50-$100K")
 
+vmt_weekly_for_model$work_cbg_2010 <- as.character(vmt_weekly_for_model$work_cbg_2010)
+
+# Get distance between home and work --------------------------------------
+## Get OD pairs for always in-person and hybrid
+od_pairs <- vmt_weekly_for_model %>%
+  filter(work_arr %in% c("Always In-Person", "Hybrid")) %>%
+  select(person_id, home_bg_2010, work_cbg_2010) %>%
+  drop_na()
+
+od_pairs <- od_pairs[, -1]
+
+## Get centroids of CBGs
+mn_bgs <- block_groups(state = "MN", year = 2010)
+mn_bgs_centroids <- st_centroid(mn_bgs) %>%
+  select(GEOID10, geometry) %>%
+  rename(bg2010 = GEOID10, geom = geometry)
 
 
-# Multinomial Logit Model -------------------------------------------------
-## Full Model --------------------------------------------------------------
-mnl_model1 <- multinom(work_arr ~ age_group + gender + employment + race + 
-                          income_detailed + num_kids + gender:num_kids + education + num_vehicles + num_hybrid_or_remote +
-                         jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 +year2021 +year2023,
-                        data = vmt_weekly_for_model)
+wi_bgs <- block_groups(state = "WI", year = 2010)
+wi_bgs_centroids <- st_centroid(wi_bgs) %>%
+  select(GEOID10, geometry) %>%
+  rename(bg2010 = GEOID10, geom = geometry)
 
-stargazer::stargazer(mnl_model1, type = "text")
-stargazer::stargazer(mnl_model1, type = "latex", single.row = T, omit.stat = "aic")
+bgs_centroids <- rbind(mn_bgs_centroids, wi_bgs_centroids)
 
-# Relative probability of being always remote rather than being always
-# in-person is 14% higher for those with an additional remote/hybrid worker in their
-# household than those without an additional remote/hybrid worker.
+od_pairs <- od_pairs %>%
+  left_join(bgs_centroids, c("home_bg_2010" = "bg2010")) 
 
-# Relative probability of being hybrid rather than being always
-# in-person is 36% higher for those with an additional remote/hybrid worker in their
-# household than those without an additional remote/hybrid worker.
+colnames(od_pairs)[4] <- "home_geom"
 
-## No Vehicles  --------------------------------------------------------------
-mnl_model2 <- multinom(work_arr ~ age_group + gender + employment + race + 
-                         income_detailed + num_kids + num_hybrid_or_remote +
-                         jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 +year2021 +year2023,
-                       data = vmt_weekly_for_model)
+od_pairs <- od_pairs %>%
+  left_join(bgs_centroids, c("work_cbg_2010" = "bg2010")) 
 
-stargazer::stargazer(mnl_model2, type = "text")
+colnames(od_pairs)[5] <- "work_geom"
 
-## Interact Women and Kids  --------------------------------------------------------------
-mnl_model3 <- multinom(work_arr ~ age_group + gender + employment + race + 
-                         income_detailed + gender:num_kids + num_hybrid_or_remote +
-                         jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 +year2021 +year2023,
-                       data = vmt_weekly_for_model)
+origins <- as.data.frame(st_coordinates(od_pairs$home_geom))
+destinations <- as.data.frame(st_coordinates(od_pairs$work_geom))
 
-stargazer::stargazer(mnl_model3, type = "text")
+# Get travel time (and distance)
+travel_times_list <- list()
+for(i in 1:nrow(origins)) {
+  src_point <- c(origins$X[i], origins$Y[i])
+  dst_point <- c(destinations$X[i], destinations$Y[i])
+  
+  # Call osrmRoute for each pair
+  route <- osrmRoute(
+    src = src_point, 
+    dst = dst_point, 
+    overview = "simplified" # Get simplified geometry
+  )
+  
+  # Store the result in the list, potentially adding an identifier
+  route$person_id <- od_pairs$person_id[i]
+  travel_times_list[[i]] <- route
+}
 
+# Combine all routes into a single sf data frame
+travel_times_df <- do.call(rbind, travel_times_list)
+travel_times_df <- travel_times_df %>%
+  select(person_id, duration, distance)
+row.names(travel_times_df) <- NULL
+travel_times_df <- travel_times_df %>%
+  st_drop_geometry()
 
-## Nested Model ------------------------------------------------------------
-#### Nest hybrid and always remote (option 1)
-#### Nest always in-person and hybrid (option 2)
+vmt_weekly_for_model <- vmt_weekly_for_model %>%
+  left_join(travel_times_df)
 
-
-
-
-# The relative probability of being always remote rather than being always in person is 12%
-# higher for people ages 18 to 34 than for people ages 35 to 54, all else equal.
-exp(0.122) 
-exp(-0.013)
-
-# Explore separate model for self employed and part time.
-
-
+write.csv(vmt_weekly_for_model, "./outputs/vmt_weekly_for_model.csv", row.names = F)

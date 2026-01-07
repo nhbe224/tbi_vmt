@@ -57,7 +57,7 @@ stargazer(as.data.frame(vmt_weekly_df))
 # Full Model  ------------------------------------------------------------
 ols_model1 <- lm(ln_vmt_weekly ~ work_arr + survey_year:work_arr + age_group + 
                    gender + employment + race + income_detailed + num_kids + 
-                   gender:num_kids + education + num_vehicles + num_hybrid_or_remote +
+                   gender:num_kids:year2021 + education + num_vehicles + num_hybrid_or_remote +
                    survey_year:num_hybrid_or_remote + work_arr:survey_year +
                    jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + survey_year, 
                    data = vmt_weekly_df, weights = person_weight) ## Drop gas price since its perfectly collinear with survey year.
@@ -99,49 +99,7 @@ stargazer::stargazer(ols_model2, type = "latex", single.row = T)
 print(paste0("On average, always remote workers are associated with a ", round(100 * (exp(summary(ols_model2)$coefficients[2, 1]) - 1), 1), "% difference in weekly VMT relative to always in-person workers."))
 print(paste0("On average, hybrid workers are associated with a ", round(100 * (exp(summary(ols_model2)$coefficients[3, 1]) - 1), 1), "% difference in weekly VMT relative to always in-person workers."))
 
-## Some Graphs ------------------------------------------------------------
-vmt_weekly_df %>%
-  group_by(work_arr) %>%
-  summarize(mean_nonwork_vmt = weighted.mean(nonwork_tour_vmt_weekly, w = person_weight, na.rm = T)) %>%
-  mutate(mean_nonwork_vmt_daily = mean_nonwork_vmt /7)
-
-vmt_daily_df %>% group_by(travel_dow) %>% 
-  summarize(mean_nonwork_vmt = weighted.mean(nonwork_tour_vmt_daily, w = person_weight, na.rm = T)) %>% 
-  ggplot(aes(x = travel_dow, y = mean_nonwork_vmt)) +
-  geom_bar(position="dodge", stat="identity") +
-  labs(title = "Non-Work Tour VMT by DOW",
-       x = "Day of Week",
-       y = "Non-Work Tour VMT")
-
-vmt_daily_df %>% group_by(work_arr_day) %>% 
-  summarize(mean_nonwork_vmt = weighted.mean(nonwork_tour_vmt_daily, w = person_weight, na.rm = T)) %>% 
-  ggplot(aes(x = work_arr_day, y = mean_nonwork_vmt)) +
-  geom_bar(position="dodge", stat="identity") +
-  labs(title = "Non-Work Tour VMT by Work Day Type",
-       x = "Work Day Type",
-       y = "Non-Work Tour VMT") +
-  geom_text(aes(label = round(mean_nonwork_vmt, 2)), size = 4, vjust = -0.25, position = position_dodge(.9))
-
-vmt_daily_df %>% group_by(work_arr, work_arr_dayH) %>% 
-  summarize(mean_nonwork_vmt = weighted.mean(nonwork_tour_vmt_daily, w = person_weight, na.rm = T)) %>% 
-  ggplot(aes(x = work_arr, y = mean_nonwork_vmt, fill = work_arr_dayH)) +
-  geom_bar(position="dodge", stat="identity") +
-  labs(title = "Non-Work Tour VMT by Work Day Type",
-       x = "Work Day Type",
-       y = "Non-Work Tour VMT") +
-  geom_text(aes(label = round(mean_nonwork_vmt, 2)), size = 4, vjust = -0.25, position = position_dodge(.9))
-
-vmt_daily_df %>% group_by(work_arr, work_arr_day) %>% 
-  summarize(mean_nonwork_vmt = weighted.mean(nonwork_tour_vmt_daily, w = person_weight, na.rm = T)) %>% 
-  ggplot(aes(x = work_arr, y = mean_nonwork_vmt, fill = work_arr_day)) +
-  geom_bar(position="dodge", stat="identity") +
-  labs(title = "Non-Work Tour VMT by Work Day Type",
-       x = "Work Day Type",
-       y = "Non-Work Tour VMT") +
-  geom_text(aes(label = round(mean_nonwork_vmt, 2)), size = 4, vjust = -0.25, position = position_dodge(.9))
-
-
-# OPSR (MSP data with Wang/Mokhtraian specification) -------------------------------------
+# OPSR (MSP Data)  -------------------------------------
 opsr_model1_rep_eq <- work_arr | ln_vmt_weekly ~ 
   # Factors that affect work arrangement
   ## Household Income
@@ -151,10 +109,13 @@ opsr_model1_rep_eq <- work_arr | ln_vmt_weekly ~
   no_bach_plus + 
   ## Employment Status
   employed_part_time + self_employed +
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote + 
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed |
+  year2021:self_employed +
+  male:kids_1plus:year2021 |
   # Factors affecting always in-person VMT
   ## Employment status
   employed_part_time + self_employed + 
@@ -173,7 +134,8 @@ opsr_model1_rep_eq <- work_arr | ln_vmt_weekly ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus | 
+  year2021:self_employed + year2021:vehicle2plus +
+  male:kids_1plus:year2021 | 
   # Factors affecting hybrid VMT
   ## Education
   no_bach_plus +
@@ -186,7 +148,8 @@ opsr_model1_rep_eq <- work_arr | ln_vmt_weekly ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus |  
+  year2021:self_employed + year2021:vehicle2plus +
+  male:kids_1plus:year2021 |  
   # Factors affecting always remote VMT
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
@@ -200,7 +163,8 @@ opsr_model1_rep_eq <- work_arr | ln_vmt_weekly ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus
+  year2021:self_employed + year2021:vehicle2plus +
+  male:kids_1plus:year2021
 
 ## Estimation
 opsr_model1_rep <- opsr(opsr_model1_rep_eq, vmt_weekly_model_mat, printLevel = 0)
@@ -403,7 +367,7 @@ ar_nonwork_vmt_counterfact
 ar_nonwork_vmt_observed - ar_nonwork_vmt_counterfact
 
 ### Work VMT Savings / Non-Work VMT Increase
-(ar_work_vmt_observed - ar_work_vmt_counterfact) / (ar_nonwork_vmt_observed - ar_nonwork_vmt_counterfact)
+abs((ar_nonwork_vmt_observed - ar_nonwork_vmt_counterfact) / (ar_work_vmt_observed - ar_work_vmt_counterfact))
 ((ar_work_vmt_observed - ar_work_vmt_counterfact) / ar_work_vmt_counterfact) / ((ar_nonwork_vmt_observed - ar_nonwork_vmt_counterfact) / ar_nonwork_vmt_counterfact)
 ## Work savings > increase in non-work VMT
 
@@ -420,13 +384,17 @@ hybrid_nonwork_vmt_counterfact
 hybrid_nonwork_vmt_observed - hybrid_nonwork_vmt_counterfact
 
 ### Work VMT Savings / Non-work VMT Increase
-(hybrid_work_vmt_observed - hybrid_work_vmt_counterfact) / (hybrid_nonwork_vmt_observed - hybrid_nonwork_vmt_counterfact)
+abs((hybrid_nonwork_vmt_observed - hybrid_nonwork_vmt_counterfact) / (hybrid_work_vmt_observed - hybrid_work_vmt_counterfact))
+
 ## Work savings > increase in non-work VMT
 
 # Displacement Model ---------------------------------------------------
 ## Model 1 -------------------------------------------------------------
-## LHS: Non-work VMT today as a function of work arrangement.
-disp_model_v1 <- lm(ln_nonwork_tour_vmt_today ~ work_arr_day +
+## Model type: OLS. 
+## Specification: Non-work VMT today as a function of work arrangement.
+## Workers: All.
+disp_model_v1 <- lm(ln_nonwork_tour_vmt_today ~ work_arr_day + n_other_remote_days
+                              + n_other_no_work_days +
                               + age_group + travel_dow +
                               gender + employment + race + income_detailed + num_kids + 
                               gender:num_kids + education + num_vehicles + num_hybrid_or_remote +
@@ -454,11 +422,45 @@ writeData(wb, "model1_ols", coeffs, startCol = 1, startRow = 1, rowNames = FALSE
 # Add the model statistics below the regression results on the same sheet
 writeData(wb, "model1_ols", stats, startCol = 1, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
 
+
+## Model 1h ----------------------------------------------------------------
+## Model type: OLS. 
+## Specification: Non-work VMT today as a function of work arrangement.
+## Workers: Hybrid
+disp_model_v1h <- lm(ln_nonwork_tour_vmt_today ~ work_arr_day + n_other_remote_days
+                     + n_other_no_work_days +
+                      + age_group + travel_dow +
+                      gender + employment + race + income_detailed + num_kids + 
+                      gender:num_kids + education + num_vehicles + num_hybrid_or_remote +
+                      survey_year:num_hybrid_or_remote + 
+                      jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + survey_year, 
+                    data = vmt_displacement[vmt_displacement$work_arr == "Hybrid", ], weights = person_weight) 
+
+stargazer::stargazer(disp_model_v1h, type = "text", single.row = T)
+
+coeffs <- tidy(disp_model_v1h)
+stats <- glance(disp_model_v1h)
+
+regression_output <- list(
+  Coefficients = coeffs,
+  Model_Statistics = stats
+)
+
+
+# Add the regression results to a sheet
+addWorksheet(wb, "model1h_ols")
+writeData(wb, "model1h_ols", coeffs, startCol = 1, startRow = 1, rowNames = FALSE)
+
+# Add the model statistics below the regression results on the same sheet
+writeData(wb, "model1h_ols", stats, startCol = 1, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
+
+
 ## Model 2 -------------------------------------------------------------
-## LHS: Non-work VMT today as a function of work arrangement, number of other 
-## remote days, and number of other no work days.
-disp_model_v2 <- lm(ln_nonwork_tour_vmt_today ~ work_arr_day + n_other_remote_days +
-                      n_other_no_work_days + ln_nonwork_tour_vmt_other_all_days +
+## Model type: OLS. 
+## Specification: Non-work VMT on other days as a function of today's work arrangement.
+## Workers: All
+disp_model_v2 <- lm(ln_nonwork_tour_vmt_other_all_days ~ work_arr_day + n_other_remote_days +
+                      n_other_no_work_days +
                       + age_group + travel_dow + 
                       gender + employment + race + income_detailed + num_kids + 
                       gender:num_kids + education + num_vehicles + num_hybrid_or_remote +
@@ -487,40 +489,55 @@ writeData(wb, "model2_ols", coeffs, startCol = 1, startRow = 1, rowNames = FALSE
 writeData(wb, "model2_ols", stats, startCol = 1, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
 
 
-# Model 2A: Model 2 but just the hybrid workers ---------------------------
-disp_model_v2a <- lm(ln_nonwork_tour_vmt_today ~ work_arr_day + n_other_remote_days +
-                      n_other_no_work_days + 
+## Model 2h -------------------------------------------------------------------
+## Model type: OLS. 
+## Specification: Non-work VMT on other days as a function of today's work arrangement.
+## Workers: Hybrid
+disp_model_v2h <- lm(ln_nonwork_tour_vmt_other_all_days ~ work_arr_day + n_other_remote_days +
+                      n_other_no_work_days +
                       + age_group + travel_dow + 
                       gender + employment + race + income_detailed + num_kids + 
                       gender:num_kids + education + num_vehicles + num_hybrid_or_remote +
                       survey_year:num_hybrid_or_remote + 
                       jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + survey_year, 
-                    data = vmt_displacement[vmt_displacement$work_arr == "Hybrid",], weights = person_weight) 
+                    data = vmt_displacement[vmt_displacement$work_arr == "Hybrid", ], weights = person_weight) 
 
-stargazer::stargazer(disp_model_v2a, type = "text", single.row = T)
+stargazer::stargazer(disp_model_v2h, type = "text", single.row = T)
 
-# Model 3 -------------------------------------------------------------
-## LHS: Non-work VMT today as a function of work arrangement, number of other 
-## remote days, and number of other no work days. Fixed effects.
-disp_model_v3 <- plm(ln_nonwork_tour_vmt_today ~ work_arr_day + n_other_remote_days +
-                     n_other_no_work_days + ln_nonwork_tour_vmt_other_all_days +
-                     age_group + travel_dow + gender + employment + race + 
-                     income_detailed + num_kids + gender:num_kids + education + 
-                     num_vehicles + num_hybrid_or_remote + survey_year:num_hybrid_or_remote + 
-                     jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + 
-                     survey_year, 
-                     index ="person_id", model = "within",
-                     data = vmt_displacement[vmt_displacement$work_arr == "Hybrid",], weights = person_weight) 
-
-stargazer::stargazer(disp_model_v3, type = "text", single.row = T)
-
-coeffs <- tidy(disp_model_v3)
-stats <- glance(disp_model_v3)
+coeffs <- tidy(disp_model_v2h)
+stats <- glance(disp_model_v2h)
 
 regression_output <- list(
   Coefficients = coeffs,
   Model_Statistics = stats
 )
+
+# Add the regression results to a sheet
+addWorksheet(wb, "model2h_ols")
+writeData(wb, "model2h_ols", coeffs, startCol = 1, startRow = 1, rowNames = FALSE)
+
+# Add the model statistics below the regression results on the same sheet
+writeData(wb, "model2h_ols", stats, startCol = 1, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
+
+
+## Model 3 -----------------------------------------------------------------
+## Model type: FE
+## Specification: Non-work VMT today as a function of work arrangement today and on other days.
+## Workers: All
+disp_model_v3 <- plm(ln_nonwork_tour_vmt_today ~ work_arr_day + n_other_remote_days +
+                       n_other_no_work_days +
+                       age_group + travel_dow + gender + employment + race + 
+                       income_detailed + num_kids + gender:num_kids + education + 
+                       num_vehicles + num_hybrid_or_remote + survey_year:num_hybrid_or_remote + 
+                       jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + 
+                       survey_year, 
+                     index ="person_id", model = "within",
+                     data = vmt_displacement, weights = person_weight) 
+
+stargazer::stargazer(disp_model_v3, type = "text", single.row = T)
+
+coeffs <- tidy(disp_model_v3)
+stats <- glance(disp_model_v3)
 
 # Add the regression results to a sheet
 addWorksheet(wb, "model3_fe")
@@ -529,18 +546,12 @@ writeData(wb, "model3_fe", coeffs, startCol = 1, startRow = 1, rowNames = FALSE)
 # Add the model statistics below the regression results on the same sheet
 writeData(wb, "model3_fe", stats, startCol = 1, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
 
-hybrid_disp <- vmt_displacement[vmt_displacement$work_arr == "Hybrid",]
-hybrid_disp %>% select(person_id, work_arr_day, n_other_no_work_days) %>%
-  count(work_arr_day, n_other_no_work_days)
 
-hybrid_disp %>% select(person_id, work_arr_day, n_other_remote_days) %>%
-  count(work_arr_day, n_other_remote_days)
-
-
-# Model 4 -----------------------------------------------------------------
-## LHS: Non-work VMT on all other days as a function of work arrangement, number of other 
-## remote days, non-work VMT today, and number of other no work days. Fixed effects.
-disp_model_v4 <- plm(ln_nonwork_tour_vmt_other_all_days ~ work_arr_day + n_other_remote_days +
+## Model 3h -----------------------------------------------------------------
+## Model type: FE
+## Specification: Non-work VMT today as a function of work arrangement today and on other days.
+## Workers: Hybrid
+disp_model_v3h <- plm(ln_nonwork_tour_vmt_today ~ work_arr_day + n_other_remote_days +
                        n_other_no_work_days +
                        age_group + travel_dow + gender + employment + race + 
                        income_detailed + num_kids + gender:num_kids + education + 
@@ -548,108 +559,25 @@ disp_model_v4 <- plm(ln_nonwork_tour_vmt_other_all_days ~ work_arr_day + n_other
                        jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + 
                        survey_year, 
                      index ="person_id", model = "within",
-                     data = vmt_displacement[vmt_displacement$work_arr == "Hybrid",], weights = person_weight) 
+                     data = vmt_displacement[vmt_displacement$work_arr == "Hybrid", ], weights = person_weight) 
 
-stargazer::stargazer(disp_model_v4, type = "text", single.row = T)
+stargazer::stargazer(disp_model_v3h, type = "text", single.row = T)
 
-coeffs <- tidy(disp_model_v4)
-stats <- glance(disp_model_v4)
+coeffs <- tidy(disp_model_v3h)
+stats <- glance(disp_model_v3h)
 
-# Model 5 -----------------------------------------------------------------
-## LHS: Non-work VMT today as a function of work arrangement, number of other 
-## remote days, and number of other no work days. Fixed effects.
-disp_model_v5 <- plm(ln_nonwork_tour_vmt_today ~ work_arr_day + n_other_remote_days +
-                       n_other_no_work_days +
-                       age_group + travel_dow + gender + employment + race + 
-                       income_detailed + num_kids + gender:num_kids + education + 
-                       num_vehicles + num_hybrid_or_remote + survey_year:num_hybrid_or_remote + 
-                       jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + 
-                       survey_year, 
-                     index ="person_id", model = "within",
-                     data = vmt_displacement[vmt_displacement$work_arr == "Hybrid",], weights = person_weight) 
+# Add the regression results to a sheet
+addWorksheet(wb, "model3h_fe")
+writeData(wb, "model3h_fe", coeffs, startCol = 1, startRow = 1, rowNames = FALSE)
 
-stargazer::stargazer(disp_model_v5, type = "text", single.row = T)
+# Add the model statistics below the regression results on the same sheet
+writeData(wb, "model3h_fe", stats, startCol = 1, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
 
-coeffs <- tidy(disp_model_v5)
-stats <- glance(disp_model_v5)
-
-# Model 6 -----------------------------------------------------------------
-## LHS: Non-work VMT on all other days as a function of work arrangement, number of other 
-## remote days, non-work VMT today, and number of other no work days. Fixed effects.
-disp_model_v6 <- plm(exp(ln_nonwork_tour_vmt_other_all_days) ~ work_arr_day + n_other_remote_days +
-                       n_other_no_work_days +
-                       age_group + travel_dow + gender + employment + race + 
-                       income_detailed + num_kids + gender:num_kids + education + 
-                       num_vehicles + num_hybrid_or_remote + survey_year:num_hybrid_or_remote + 
-                       jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + 
-                       survey_year, 
-                     index ="person_id", model = "within",
-                     data = vmt_displacement[vmt_displacement$work_arr == "Hybrid",], weights = person_weight) 
-
-stargazer::stargazer(disp_model_v6, type = "text", single.row = T)
-
-coeffs <- tidy(disp_model_v6)
-stats <- glance(disp_model_v6)
-
-# Model 7 -----------------------------------------------------------------
-## LHS: Non-work VMT today as a function of work arrangement, number of other 
-## remote days, and number of other no work days. Fixed effects.
-disp_model_v7 <- plm(nonwork_tour_vmt_today ~ work_arr_day + n_other_remote_days +
-                       n_other_no_work_days +
-                       age_group + travel_dow + gender + employment + race + 
-                       income_detailed + num_kids + gender:num_kids + education + 
-                       num_vehicles + num_hybrid_or_remote + survey_year:num_hybrid_or_remote + 
-                       jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + 
-                       survey_year, 
-                     index ="person_id", model = "within",
-                     data = vmt_displacement[vmt_displacement$work_arr == "Hybrid",], weights = person_weight) 
-
-stargazer::stargazer(disp_model_v7, type = "text", single.row = T)
-
-coeffs <- tidy(disp_model_v7)
-stats <- glance(disp_model_v7)
-
-# Model 8 -------------------------------------------------------------
-## LHS: Non-work VMT today as a function of work arrangement.
-disp_model_v8 <- lm(nonwork_tour_vmt_today ~ work_arr_day +
-                      + age_group + travel_dow +
-                      gender + employment + race + income_detailed + num_kids + 
-                      gender:num_kids + education + num_vehicles + num_hybrid_or_remote +
-                      survey_year:num_hybrid_or_remote + 
-                      jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + survey_year, 
-                    data = vmt_displacement[vmt_displacement$work_arr == "Hybrid",], weights = person_weight) 
-
-stargazer::stargazer(disp_model_v8, type = "text", single.row = T)
-
-coeffs <- tidy(disp_model_v8)
-stats <- glance(disp_model_v8)
-
-# Model 9 -------------------------------------------------------------
-## LHS: Non-work VMT today as a function of work arrangement, number of other 
-## remote days, and number of other no work days.
-disp_model_v9 <- lm(exp(ln_nonwork_tour_vmt_other_all_days) ~ work_arr_day +
-                      + age_group + travel_dow + 
-                      gender + employment + race + income_detailed + num_kids + 
-                      gender:num_kids + education + num_vehicles + num_hybrid_or_remote +
-                      survey_year:num_hybrid_or_remote + 
-                      jobs_per_hh + emp8_ent + intersection_den + transit_jobs30 + survey_year, 
-                    data = vmt_displacement, weights = person_weight) 
-
-stargazer::stargazer(disp_model_v9, type = "text", single.row = T)
-
-coeffs <- tidy(disp_model_v9)
-stats <- glance(disp_model_v9)
-
-regression_output <- list(
-  Coefficients = coeffs,
-  Model_Statistics = stats
-)
-
-
-# Model 10 -------------------------------------------------------------
-## LHS: Non-work VMT today as a function of work arrangement, number of other 
-## remote days, and number of other no work days. OPSR. All days.
-disp_model_v10_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_today ~ 
+## Model 4 -------------------------------------------------------------
+## Model type: OPSR
+## Specification: Non-work VMT today as a function of work arrangement today and on other days.
+## Workers: All
+disp_model_v4_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_today ~ 
   # Factors that affect work arrangement today
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
@@ -660,8 +588,11 @@ disp_model_v10_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_today ~
   no_bach_plus + 
   ## Employment Status
   employed_part_time + self_employed +
+  ## Number of hybrid and remote employees apart from self
+  num_hybrid_or_remote +
   ## Day of week
-  sunday + monday + tuesday + thursday + friday + saturday |
+  sunday + monday + tuesday + thursday + friday + saturday +
+  male:kids_1plus:year2021 |
   # Factors affecting in-person day VMT
   ## Other days' VMT and remote/non-work days 
   n_other_remote_days +
@@ -680,6 +611,8 @@ disp_model_v10_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_today ~
   vehicle1 + vehicle2plus +
   ## Built Environment 
   jobs_per_hh + intersection_den + emp8_ent +
+  ## Interaction 
+  male:kids_1plus:year2021 +
   ## Day of week
   sunday + monday + tuesday + thursday + friday + saturday |
   # Factors affecting remote day VMT
@@ -692,6 +625,8 @@ disp_model_v10_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_today ~
   employed_part_time + self_employed + 
   ## Built Environment 
   jobs_per_hh + intersection_den +
+  ## Interaction 
+  male:kids_1plus:year2021 +
   ## Day of week
   sunday + monday + tuesday + thursday + friday + saturday |
   # Factors affecting no work day VMT
@@ -707,21 +642,60 @@ disp_model_v10_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_today ~
   jobs_per_hh + intersection_den + emp8_ent +
   ## Kids
   kids_1plus +
+  ## Interaction 
+  male:kids_1plus:year2021 +
   ## Day of week
   sunday + monday + tuesday + thursday + friday + saturday
 
 ## Estimation
-disp_model_v10_opsr <- opsr(disp_model_v10_opsr_eq, vmt_displacement_mat, weights = vmt_displacement_mat$person_weight, printLevel = 0)
-summary(disp_model_v10_opsr)
+disp_model_v4_opsr <- opsr(disp_model_v4_opsr_eq, vmt_displacement_mat, weights = vmt_displacement_mat$person_weight, printLevel = 0)
+summary(disp_model_v4_opsr)
 
 ## Treatment effects 
-disp_model_v10_te <- opsr_te(disp_model_v10_opsr, type = "unlog-response")
-print(disp_model_v10_te)
+disp_model_v4_opsr_te <- opsr_te(disp_model_v4_opsr, type = "unlog-response")
+print(disp_model_v4_opsr_te)
 
-## Model 11 -------------------------------------------------------------
-## LHS: Non-work VMT all other days as a function of work arrangement, number of other 
-## remote days, and number of other no work days. OPSR. All days.
-disp_model_v11_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_other_all_days ~ 
+te_summary <- summary(disp_model_v4_opsr_te)$te
+
+## Get data for worksheet
+coeffs <- summary(disp_model_v4_opsr)$coef_table
+coeffs$terms <- rownames(coeffs)
+rownames(coeffs) <- NULL
+
+colnames(coeffs) <- c("Estimate", "Standard Error", "t-statistic", "p-value", "Terms")
+coeffs <- coeffs %>%
+  select(Terms, Estimate, `Standard Error`, `t-statistic`, `p-value`)
+
+disp_model_v4_opsr_summary <- summary(disp_model_v4_opsr)
+disp_model_v4_opsr$nObs
+disp_model_v4_opsr_summary$GOF$AIC[1]
+disp_model_v4_opsr_summary$GOF$BIC
+disp_model_v4_opsr_summary$GOFcomponents$R2[1]
+disp_model_v4_opsr_summary$df
+
+stats <- data.frame("nObs_always_in_person" = disp_model_v4_opsr$nObs[2],
+                         "nObs_hybrid" = disp_model_v4_opsr$nObs[3],
+                         "nObs_always_remote" = disp_model_v4_opsr$nObs[4],
+                         "AIC" = disp_model_v4_opsr_summary$GOF$AIC[1],
+                         "BIC" = disp_model_v4_opsr_summary$GOF$BIC,
+                         "r-squared" = disp_model_v4_opsr_summary$GOFcomponents$R2[1])
+rownames(stats) = NULL
+
+
+# Add the regression results to a sheet
+addWorksheet(wb, "model4_opsr")
+writeData(wb, "model4_opsr", coeffs, startCol = 1, startRow = 1, rowNames = FALSE)
+
+# Add the model statistics below the regression results on the same sheet
+writeData(wb, "model4_opsr", stats, startCol = 1, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
+
+writeData(wb, "model4_opsr", te_summary, startCol = 1, startRow = nrow(coeffs) + nrow(stats) + 6, rowNames = TRUE) 
+
+## Model 4h -------------------------------------------------------------
+## Model type: OPSR
+## Specification: Non-work VMT today as a function of work arrangement today and on other days.
+## Workers: Hybrid
+disp_model_v4h_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_today ~ 
   # Factors that affect work arrangement today
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
@@ -732,8 +706,11 @@ disp_model_v11_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_other_all_days ~
   no_bach_plus + 
   ## Employment Status
   employed_part_time + self_employed +
+  ## Number of hybrid and remote employees apart from self
+  num_hybrid_or_remote +
   ## Day of week
-  sunday + monday + tuesday + thursday + friday + saturday |
+  sunday + monday + tuesday + thursday + friday + saturday +
+  male:kids_1plus:year2021 |
   # Factors affecting in-person day VMT
   ## Other days' VMT and remote/non-work days 
   n_other_remote_days +
@@ -752,6 +729,8 @@ disp_model_v11_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_other_all_days ~
   vehicle1 + vehicle2plus +
   ## Built Environment 
   jobs_per_hh + intersection_den + emp8_ent +
+  ## Interaction 
+  male:kids_1plus:year2021 +
   ## Day of week
   sunday + monday + tuesday + thursday + friday + saturday |
   # Factors affecting remote day VMT
@@ -764,6 +743,8 @@ disp_model_v11_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_other_all_days ~
   employed_part_time + self_employed + 
   ## Built Environment 
   jobs_per_hh + intersection_den +
+  ## Interaction 
+  male:kids_1plus:year2021 +
   ## Day of week
   sunday + monday + tuesday + thursday + friday + saturday |
   # Factors affecting no work day VMT
@@ -779,23 +760,172 @@ disp_model_v11_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_other_all_days ~
   jobs_per_hh + intersection_den + emp8_ent +
   ## Kids
   kids_1plus +
+  ## Interaction 
+  male:kids_1plus:year2021 +
   ## Day of week
   sunday + monday + tuesday + thursday + friday + saturday
 
 ## Estimation
-disp_model_v11_opsr <- opsr(disp_model_v11_opsr_eq, vmt_displacement_mat, weights = vmt_displacement_mat$person_weight, printLevel = 0)
-summary(disp_model_v11_opsr)
+disp_model_v4h_opsr <- opsr(disp_model_v4h_opsr_eq, vmt_displacement_mat[vmt_displacement_mat$work_arr == 2, ], weights = vmt_displacement_mat[vmt_displacement_mat$work_arr == 2, ]$person_weight, printLevel = 0)
+summary(disp_model_v4h_opsr)
 
 ## Treatment effects 
-disp_model_v11_te <- opsr_te(disp_model_v11_opsr, type = "unlog-response")
-print(disp_model_v11_te)
+disp_model_v4h_opsr_te <- opsr_te(disp_model_v4h_opsr, type = "unlog-response")
+print(disp_model_v4h_opsr_te)
+
+## Get data for worksheet
+te_summary <- summary(disp_model_v4h_opsr_te)$te
+disp_model_v4h_opsr_summary <- summary(disp_model_v4h_opsr)
+
+## Prepare data for worksheet
+coeffs <- summary(disp_model_v4h_opsr)$coef_table
+coeffs$terms <- rownames(coeffs)
+rownames(coeffs) <- NULL
+
+colnames(coeffs) <- c("Estimate", "Standard Error", "t-statistic", "p-value", "Terms")
+coeffs <- coeffs %>%
+  select(Terms, Estimate, `Standard Error`, `t-statistic`, `p-value`)
+
+stats <- data.frame("nObs_always_in_person" = disp_model_v4h_opsr$nObs[2],
+                    "nObs_hybrid" = disp_model_v4h_opsr$nObs[3],
+                    "nObs_always_remote" = disp_model_v4h_opsr$nObs[4],
+                    "AIC" = disp_model_v4h_opsr_summary$GOF$AIC[1],
+                    "BIC" = disp_model_v4h_opsr_summary$GOF$BIC,
+                    "r-squared" = disp_model_v4h_opsr_summary$GOFcomponents$R2[1])
+rownames(stats) = NULL
 
 
-# Daily Rebound Effects ---------------------------------------------------
+# Add the regression results to a sheet
+addWorksheet(wb, "model4h_opsr")
+writeData(wb, "model4h_opsr", coeffs, startCol = 1, startRow = 1, rowNames = FALSE)
+
+# Add the model statistics below the regression results on the same sheet
+writeData(wb, "model4h_opsr", stats, startCol = 1, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
+writeData(wb, "model4h_opsr", te_summary, startCol = 1, startRow = nrow(coeffs) + nrow(stats) + 6, rowNames = TRUE) 
+
+
+## Model 5 -------------------------------------------------------------
+## Model type: OPSR
+## Specification: Non-work VMT on other days as a function of work arrangement today and on other days.
+## Workers: All
+disp_model_v5_opsr_eq <- work_arr_day | ln_nonwork_tour_vmt_other_all_days ~ 
+  # Factors that affect work arrangement today
+  ## Household Income
+  hh_income_under50 + hh_income100to150 + hh_income150to200 + 
+  hh_income_200plus + hh_income_undisclosed +
+  ## Number of hybrid and remote employees apart from self
+  num_hybrid_or_remote +
+  ## Commute length
+  minutes_to_work + 
+  ## Education
+  no_bach_plus + 
+  ## Employment Status
+  employed_part_time + self_employed +
+  ## Day of week
+  sunday + monday + tuesday + thursday + friday + saturday +
+  male:kids_1plus:year2021 |
+  # Factors affecting in-person day VMT
+  ## Other days' VMT and remote/non-work days 
+  n_other_remote_days +
+  n_other_no_work_days + 
+  ## Employment status
+  employed_part_time + self_employed + 
+  ## Gender
+  male +
+  ## Age
+  age18to34 + age55plus +
+  ## Kids
+  kids_1plus +
+  ## Race
+  nonWhite +
+  ## Number of vehicles
+  vehicle1 + vehicle2plus +
+  ## Built Environment 
+  jobs_per_hh + intersection_den + emp8_ent +
+  ## Interaction 
+  male:kids_1plus:year2021 +
+  ## Day of week
+  sunday + monday + tuesday + thursday + friday + saturday |
+  # Factors affecting remote day VMT
+  ## Other days' VMT and remote/non-work days 
+  n_other_remote_days +
+  n_other_no_work_days  +
+  ## Education
+  no_bach_plus +
+  ## Employment status 
+  employed_part_time + self_employed + 
+  ## Built Environment 
+  jobs_per_hh + intersection_den +
+  ## Interaction 
+  male:kids_1plus:year2021 +
+  ## Day of week
+  sunday + monday + tuesday + thursday + friday + saturday |
+  # Factors affecting no work day VMT
+  ## Other days' VMT and remote/non-work days 
+  n_other_remote_days +
+  n_other_no_work_days  +
+  ## Household Income
+  hh_income_under50 + hh_income100to150 + hh_income150to200 + 
+  hh_income_200plus + hh_income_undisclosed +
+  ## Gender
+  male +
+  ## Built Environment 
+  jobs_per_hh + intersection_den + emp8_ent +
+  ## Kids
+  kids_1plus +
+  ## Interaction 
+  male:kids_1plus:year2021 +
+  ## Day of week
+  sunday + monday + tuesday + thursday + friday + saturday
+
+## Estimation
+disp_model_v5_opsr <- opsr(disp_model_v5_opsr_eq, vmt_displacement_mat, weights = vmt_displacement_mat$person_weight, printLevel = 0)
+summary(disp_model_v5_opsr)
+
+## Treatment effects 
+disp_model_v5_opsr_te <- opsr_te(disp_model_v5_opsr, type = "unlog-response")
+print(disp_model_v5_opsr_te)
+
+## Get data for worksheet
+te_summary <- summary(disp_model_v5_opsr_te)$te
+disp_model_v5_opsr_summary <- summary(disp_model_v5_opsr)
+
+## Prepare data for worksheet
+coeffs <- summary(disp_model_v5_opsr)$coef_table
+coeffs$terms <- rownames(coeffs)
+rownames(coeffs) <- NULL
+
+colnames(coeffs) <- c("Estimate", "Standard Error", "t-statistic", "p-value", "Terms")
+coeffs <- coeffs %>%
+  select(Terms, Estimate, `Standard Error`, `t-statistic`, `p-value`)
+
+stats <- data.frame("nObs_always_in_person" = disp_model_v5_opsr$nObs[2],
+                    "nObs_hybrid" = disp_model_v5_opsr$nObs[3],
+                    "nObs_always_remote" = disp_model_v5_opsr$nObs[4],
+                    "AIC" = disp_model_v5_opsr_summary$GOF$AIC[1],
+                    "BIC" = disp_model_v5_opsr_summary$GOF$BIC,
+                    "r-squared" = disp_model_v5_opsr_summary$GOFcomponents$R2[1])
+rownames(stats) = NULL
+
+# Add the regression results to a sheet
+addWorksheet(wb, "model5_opsr")
+writeData(wb, "model5_opsr", coeffs, startCol = 1, startRow = 1, rowNames = FALSE)
+
+# Add the model statistics below the regression results on the same sheet
+writeData(wb, "model5_opsr", stats, startCol = 1, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
+writeData(wb, "model5_opsr", te_summary, startCol = 1, startRow = nrow(coeffs) + nrow(stats) + 6, rowNames = TRUE) 
+
+
+## Model 6: Displacement Via Daily Rebound Effects ----------------------------
+## Model type: OPSR
+## Specification: Non-work VMT on other days as a function of weekly work arrangement and on other days.
+## Workers: All
+### Part 1: Daily Savings ---------------------------------------
 vmt_daily_model_mat$work_arr_day <- factor(vmt_daily_model_mat$work_arr_day, levels = c(1, 2, 3))
 vmt_daily_model_mat$in_person_day <- ifelse(vmt_daily_model_mat$work_arr_day == 1, 1, 0)
 vmt_daily_model_mat$remote_day <- ifelse(vmt_daily_model_mat$work_arr_day == 2, 1, 0)
 vmt_daily_model_mat$no_work_day  <- ifelse(vmt_daily_model_mat$work_arr_day == 3, 1, 0)
+vmt_daily_model_mat$travel_dow <-relevel(vmt_daily_model_mat$travel_dow, ref = "Wednesday")
 
 rebound_work_savings_daily_eq <- work_arr | ln_work_tour_vmt_daily ~ 
   # Factors that affect work arrangement
@@ -806,10 +936,12 @@ rebound_work_savings_daily_eq <- work_arr | ln_work_tour_vmt_daily ~
   no_bach_plus + 
   ## Employment Status
   employed_part_time + self_employed +
+  ## Number of hybrid and remote employees apart from self
+  num_hybrid_or_remote +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed |
+  year2021:self_employed + male:kids_1plus:year2021 |
   # Factors affecting always in-person VMT
   ## Employment status
   employed_part_time + self_employed + 
@@ -826,11 +958,12 @@ rebound_work_savings_daily_eq <- work_arr | ln_work_tour_vmt_daily ~
   ## Built Environment 
   jobs_per_hh + intersection_den + emp8_ent +
   ## DOW
-  travel_dow + 
+  travel_dow +
+  ## Interaction 
+  male:kids_1plus:year2021 +
   ## Year
   year2021 + year2023 +
-  ## Interactions
-  year2021:self_employed + year2021:vehicle2plus | 
+  year2021:vehicle2plus |
   # Factors affecting hybrid VMT
   ## Education
   no_bach_plus +
@@ -838,12 +971,11 @@ rebound_work_savings_daily_eq <- work_arr | ln_work_tour_vmt_daily ~
   employed_part_time + self_employed + 
   ## Built Environment 
   jobs_per_hh + intersection_den +
+  ## Interaction 
+  male:kids_1plus:year2021 +
   ## DOW
-  travel_dow + 
-  ## Year
-  year2021 + year2023 +
-  ## Interactions
-  year2021:self_employed + year2021:vehicle2plus |  
+  travel_dow +
+  year2021 + year2023 |  
   # Factors affecting always remote VMT
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
@@ -855,11 +987,11 @@ rebound_work_savings_daily_eq <- work_arr | ln_work_tour_vmt_daily ~
   ## Kids
   kids_1plus +
   ## DOW
-  travel_dow + 
+  travel_dow +
+  ## Interaction 
+  male:kids_1plus:year2021 +
   ## Year
-  year2021 + year2023 +
-  ## Interactions
-  year2021:self_employed + year2021:vehicle2plus
+  year2021 + year2023
 
 ## Estimation
 rebound_work_savings_daily <- opsr(rebound_work_savings_daily_eq, vmt_daily_model_mat, printLevel = 0)
@@ -869,12 +1001,14 @@ summary(rebound_work_savings_daily)
 rebound_work_savings_daily_te <- opsr_te(rebound_work_savings_daily, type = "unlog-response", weights = vmt_daily_model_mat$person_weight)
 print(rebound_work_savings_daily_te)
 
-
+### Part 2: Increase in Non-Work VMT -----------------------------------------
 rebound_nonwork_increase_daily_eq <- work_arr | ln_nonwork_tour_vmt_daily ~ 
   # Factors that affect work arrangement
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
   hh_income_200plus + hh_income_undisclosed +
+  ## Number of hybrid and remote employees apart from self
+  num_hybrid_or_remote +
   ## Education
   no_bach_plus + 
   ## Employment Status
@@ -882,7 +1016,7 @@ rebound_nonwork_increase_daily_eq <- work_arr | ln_nonwork_tour_vmt_daily ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed |
+  year2021:self_employed + male:kids_1plus:year2021 |
   # Factors affecting always in-person VMT
   ## Daily work arrangement
   remote_day + no_work_day + 
@@ -904,6 +1038,8 @@ rebound_nonwork_increase_daily_eq <- work_arr | ln_nonwork_tour_vmt_daily ~
   travel_dow + 
   ## Year
   year2021 + year2023 +
+  ## Interaction 
+  male:kids_1plus:year2021 +
   ## Interactions
   year2021:self_employed + year2021:vehicle2plus | 
   # Factors affecting hybrid VMT
@@ -919,7 +1055,8 @@ rebound_nonwork_increase_daily_eq <- work_arr | ln_nonwork_tour_vmt_daily ~
   travel_dow + 
   ## Year
   year2021 + year2023 +
-  ## Interactions
+  ## Interaction 
+  male:kids_1plus:year2021 +
   year2021:self_employed + year2021:vehicle2plus |  
   # Factors affecting always remote VMT
   ## Daily work arrangement
@@ -937,6 +1074,8 @@ rebound_nonwork_increase_daily_eq <- work_arr | ln_nonwork_tour_vmt_daily ~
   travel_dow + 
   ## Year
   year2021 + year2023 +
+  ## Interaction 
+  male:kids_1plus:year2021 +
   ## Interactions
   year2021:self_employed + year2021:vehicle2plus
 
@@ -951,69 +1090,65 @@ print(rebound_nonwork_increase_daily_te)
 print(rebound_work_savings_daily_te)
 print(rebound_nonwork_increase_daily_te)
 
-nonwork_day_work_vmt_observed <- weighted.mean(predict(rebound_work_savings_daily, group = 3, type = "unlog-response"), w = vmt_daily_model_mat$person_weight, na.rm = T)
-nonwork_day_vmt_counterfact <- weighted.mean(predict(rebound_work_savings_daily, group = 3, counterfact = 1,  type = "unlog-response"), w = vmt_daily_model_mat$person_weight, na.rm = T)
-nonwork_day_observed
-nonwork_day_counterfact
-nonwork_day_observed - nonwork_day_vmt_counterfact
+## Get data for worksheet
+te_summary_decrease <- summary(rebound_work_savings_daily_te)$te
+te_summary_increase <- summary(rebound_nonwork_increase_daily_te)$te
+rebound_work_decrease_daily_summary <- summary(rebound_work_savings_daily)
+rebound_nonwork_increase_daily_summary <- summary(rebound_nonwork_increase_daily)
 
-nonwork_day_nonwork_vmt_observed <- weighted.mean(predict(rebound_nonwork_increase, group = 3, type = "unlog-response"), w = vmt_daily_model_mat$person_weight, na.rm = T)
-nonwork_day_nonwork_vmt_counterfact <- weighted.mean(predict(rebound_nonwork_increase, group = 3, counterfact = 1,  type = "unlog-response"), w = vmt_daily_model_mat$person_weight, na.rm = T)
-nonwork_day_nonwork_vmt_observed
-nonwork_day_nonwork_vmt_counterfact
-nonwork_day_nonwork_vmt_observed - nonwork_day_nonwork_vmt_counterfact
+## Prepare data for worksheet
+coeffs <- rebound_work_decrease_daily_summary$coef_table
+coeffs$terms <- rownames(coeffs)
+rownames(coeffs) <- NULL
 
-### Work VMT Savings / Non-Work VMT Increase
-(ar_work_vmt_observed - ar_work_vmt_counterfact) / (ar_nonwork_vmt_observed - ar_nonwork_vmt_counterfact)
-((ar_work_vmt_observed - ar_work_vmt_counterfact) / ar_work_vmt_counterfact) / ((ar_nonwork_vmt_observed - ar_nonwork_vmt_counterfact) / ar_nonwork_vmt_counterfact)
-## Work savings > increase in non-work VMT
+colnames(coeffs) <- c("Estimate", "Standard Error", "t-statistic", "p-value", "Terms")
+coeffs <- coeffs %>%
+  select(Terms, Estimate, `Standard Error`, `t-statistic`, `p-value`)
 
-in_person_day_work_vmt_observed <- weighted.mean(predict(rebound_work_savings, group = 2, type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
-in_person_day_work_vmt_counterfact <- weighted.mean(predict(rebound_work_savings, group = 2, counterfact = 1,  type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
-in_person_day_work_vmt_observed
-in_person_day_work_vmt_counterfact
-in_person_day_work_vmt_observed - in_person_day_work_vmt_counterfact
 
-in_person_day_nonwork_vmt_observed <- weighted.mean(predict(rebound_nonwork_increase, group = 2, type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
-in_person_day_nonwork_vmt_counterfact <- weighted.mean(predict(rebound_nonwork_increase, group = 2, counterfact = 1,  type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
-in_person_day_nonwork_vmt_observed
-in_person_day_nonwork_vmt_counterfact
-in_person_day_nonwork_vmt_observed - in_person_day_nonwork_vmt_counterfact
-
-### Work VMT Savings / Non-work VMT Increase
-(hybrid_work_vmt_observed - hybrid_work_vmt_counterfact) / (hybrid_nonwork_vmt_observed - hybrid_nonwork_vmt_counterfact)
-## Work savings > increase in non-work VMT
-
-#############################
-model_summary <- summary(disp_model_v4)$coefficients
-
-model_stats_df <- data.frame(
-  R_squared = model_summary$r.squared,
-  Adj_R_squared = model_summary$adj.r.squared,
-  F_statistic = model_summary$fstatistic[1],
-  df1 = model_summary$fstatistic[2],
-  df2 = model_summary$fstatistic[3],
-  p_value = pf(model_summary$fstatistic[1], model_summary$fstatistic[2],
-               model_summary$fstatistic[3], lower.tail = FALSE)
-)
-
-coeffs <- extract(disp_model_v4)
-stats <- glance(disp_model_v4)
-
-regression_output <- list(
-  Coefficients = coeffs,
-  Model_Statistics = stats
-)
+stats <- data.frame("nObs_always_in_person" = rebound_work_savings_daily$nObs[2],
+                    "nObs_hybrid" = rebound_work_savings_daily$nObs[3],
+                    "nObs_always_remote" = rebound_work_savings_daily$nObs[4],
+                    "AIC" = rebound_work_decrease_daily_summary$GOF$AIC[1],
+                    "BIC" = rebound_work_decrease_daily_summary$GOF$BIC,
+                    "r-squared" = rebound_work_decrease_daily_summary$GOFcomponents$R2[1])
+rownames(stats) = NULL
 
 # Add the regression results to a sheet
-addWorksheet(wb, "model4_opsr")
-writeData(wb, "model4_opsr", coeffs, startCol = 1, startRow = 1, rowNames = FALSE)
+addWorksheet(wb, "model6_opsr")
+writeData(wb, "model6_opsr", coeffs, startCol = 1, startRow = 1, rowNames = FALSE)
 
 # Add the model statistics below the regression results on the same sheet
-writeData(wb, "model4_opsr", stats, startCol = 1, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
+writeData(wb, "model6_opsr", stats, startCol = 1, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
+writeData(wb, "model6_opsr", te_summary_decrease, startCol = 1, startRow = nrow(coeffs) + nrow(stats) + 6, rowNames = TRUE) 
+
+
+## Prepare data for worksheet
+coeffs <- rebound_nonwork_increase_daily_summary$coef_table
+coeffs$terms <- rownames(coeffs)
+rownames(coeffs) <- NULL
+
+colnames(coeffs) <- c("Estimate", "Standard Error", "t-statistic", "p-value", "Terms")
+coeffs <- coeffs %>%
+  select(Terms, Estimate, `Standard Error`, `t-statistic`, `p-value`)
+
+stats <- data.frame("nObs_always_in_person" = rebound_nonwork_increase_daily$nObs[2],
+                    "nObs_hybrid" =  rebound_nonwork_increase_daily$nObs[3],
+                    "nObs_always_remote" =  rebound_nonwork_increase_daily$nObs[4],
+                    "AIC" = rebound_nonwork_increase_daily_summary$GOF$AIC[1],
+                    "BIC" = rebound_nonwork_increase_daily_summary$GOF$BIC,
+                    "r-squared" = rebound_nonwork_increase_daily_summary$GOFcomponents$R2[1])
+rownames(stats) = NULL
+
+writeData(wb, "model6_opsr", coeffs, startCol = 8, startRow = 1, rowNames = FALSE)
+
+# Add the model statistics below the regression results on the same sheet
+writeData(wb, "model6_opsr", stats, startCol = 8, startRow = nrow(coeffs) + 3, rowNames = FALSE) 
+writeData(wb, "model6_opsr", te_summary_increase, startCol = 8, startRow = nrow(coeffs) + nrow(stats) + 6, rowNames = TRUE) 
+
 
 ## Save the workbook to an Excel file -----------------------------------------
-saveWorkbook(wb, "./regressions_comparison/displacement.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "./regressions_comparison/displacement_v1.xlsx", overwrite = TRUE)
 
 
 # OPSR Replication --------------------------------------------------------
