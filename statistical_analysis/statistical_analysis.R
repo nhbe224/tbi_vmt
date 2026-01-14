@@ -283,6 +283,7 @@ rebound_work_savings_te <- opsr_te(rebound_work_savings, type = "unlog-response"
 summary(rebound_work_savings)
 print(rebound_work_savings_te)
 rebound_work_savings_te$ce.by.treatments[[1]]
+texreg(rebound_work_savings, single.row = T, file = "./rebound_work_decrease.tex")
 
 rebound_nonwork_increase_eq <- work_arr | ln_nonwork_tour_vmt_weekly ~ 
   # Factors that affect work arrangement
@@ -350,6 +351,8 @@ rebound_nonwork_increase <- opsr(rebound_nonwork_increase_eq, vmt_weekly_model_m
 rebound_nonwork_increase_te <- opsr_te(rebound_nonwork_increase, type = "unlog-response", weights = vmt_weekly_model_mat$person_weight)
 
 summary(rebound_nonwork_increase)
+texreg(rebound_nonwork_increase, single.row = T, file = "./rebound_nonwork_increase.tex")
+
 
 print(rebound_work_savings_te)
 print(rebound_nonwork_increase_te)
