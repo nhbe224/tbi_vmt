@@ -227,7 +227,8 @@ rebound_work_savings_eq <- work_arr | ln_work_tour_vmt_weekly ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed |
+  year2021:self_employed + year2021:vehicle2plus +
+  male:kids_1plus:year2021 |
   # Factors affecting always in-person VMT
   ## Employment status
   employed_part_time + self_employed + 
@@ -246,7 +247,8 @@ rebound_work_savings_eq <- work_arr | ln_work_tour_vmt_weekly ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus | 
+  year2021:self_employed +
+  male:kids_1plus:year2021 | 
   # Factors affecting hybrid VMT
   ## Education
   no_bach_plus +
@@ -259,7 +261,8 @@ rebound_work_savings_eq <- work_arr | ln_work_tour_vmt_weekly ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus |  
+  year2021:self_employed + year2021:vehicle2plus +
+  male:kids_1plus:year2021 |  
   # Factors affecting always remote VMT
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
@@ -273,7 +276,8 @@ rebound_work_savings_eq <- work_arr | ln_work_tour_vmt_weekly ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus
+  year2021:self_employed + year2021:vehicle2plus +
+  male:kids_1plus:year2021
 
 ## Estimation
 rebound_work_savings <- opsr(rebound_work_savings_eq, vmt_weekly_model_mat, printLevel = 0)
@@ -297,7 +301,8 @@ rebound_nonwork_increase_eq <- work_arr | ln_nonwork_tour_vmt_weekly ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed |
+  year2021:self_employed + year2021:vehicle2plus +
+  male:kids_1plus:year2021 |
   # Factors affecting always in-person VMT
   ## Employment status
   employed_part_time + self_employed + 
@@ -316,7 +321,8 @@ rebound_nonwork_increase_eq <- work_arr | ln_nonwork_tour_vmt_weekly ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus | 
+  year2021:self_employed + year2021:vehicle2plus +
+  male:kids_1plus:year2021 | 
   # Factors affecting hybrid VMT
   ## Education
   no_bach_plus +
@@ -329,7 +335,8 @@ rebound_nonwork_increase_eq <- work_arr | ln_nonwork_tour_vmt_weekly ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus |  
+  year2021:self_employed + year2021:vehicle2plus +
+  male:kids_1plus:year2021 |  
   # Factors affecting always remote VMT
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
@@ -343,7 +350,8 @@ rebound_nonwork_increase_eq <- work_arr | ln_nonwork_tour_vmt_weekly ~
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus
+  year2021:self_employed + year2021:vehicle2plus +
+  male:kids_1plus:year2021
 
 ## Estimation
 rebound_nonwork_increase <- opsr(rebound_nonwork_increase_eq, vmt_weekly_model_mat, printLevel = 0)
