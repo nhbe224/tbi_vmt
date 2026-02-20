@@ -4,7 +4,8 @@ setwd("D:/neeco/thesis/tbi_vmt/exploratory_analysis/")
 
 # Load Packages -----------------------------------------------------------
 packages_vector <- c("tidyverse", "sf", "tigris", "tidycensus", "data.table", "patchwork", 
-                     "janitor", "tools", "spatstat", "gridExtra", "grid", "gtable", "ggpattern")
+                     "janitor", "tools", "spatstat", "gridExtra", "grid", "gtable", "ggpattern",
+                     "stargazer", "Hmisc", "dplyr")
 need_to_install <- packages_vector[!(packages_vector %in% installed.packages()[,"Package"])]
 if (length(need_to_install)) install.packages(need_to_install)
 lapply(packages_vector, library, character.only = TRUE)
@@ -19,33 +20,108 @@ vmt_weekly_model_mat <- vmt_files[["vmt_weekly_model_mat"]]
 vmt_daily_model_mat <- vmt_files[["vmt_daily_model_mat"]]
 vmt_displacement <- vmt_files[["vmt_displacement"]]
 
-# Clean Data ---------------------------------------------------------------
+
+# Summary Tables ----------------------------------------------------------
+## Continuous Variables ---------------------------------------------------
+aip_vmt_weekly_df <- vmt_weekly_df %>%
+  filter(work_arr == "Always In-Person")
+
+hybrid_vmt_weekly_df <- vmt_weekly_df %>%
+  filter(work_arr == "Hybrid")
+
+ar_vmt_weekly_df <- vmt_weekly_df %>%
+  filter(work_arr == "Always Remote")
+
+continuous_vars <- c("vmt_weekly", "work_tour_vmt_weekly", "nonwork_tour_vmt_weekly",
+                     "jobs_per_hh", "transit_jobs30", "intersection_den", "emp8_ent", 
+                     "num_hybrid_or_remote", "person_weight")
+
+aip_continuous <- aip_vmt_weekly_df[, continuous_vars]
+hybrid_continuous <- hybrid_vmt_weekly_df[, continuous_vars]
+ar_continuous <- ar_vmt_weekly_df[, continuous_vars]
+
+aip_w_means <- sapply(aip_continuous[continuous_vars[-length(continuous_vars)]], 
+                      function(x) weighted.mean(x, w = aip_continuous$person_weight))
+hybrid_w_means <- sapply(hybrid_continuous[continuous_vars[-length(continuous_vars)]], 
+                      function(x) weighted.mean(x, w = hybrid_continuous$person_weight))
+ar_w_means <- sapply(ar_continuous[continuous_vars[-length(continuous_vars)]], 
+                      function(x) weighted.mean(x, w = ar_continuous$person_weight))
+
+print(aip_w_means)
+print(hybrid_w_means)
+print(ar_w_means)
+
+
+aip_w_sd <- sapply(aip_continuous[continuous_vars[-length(continuous_vars)]], 
+                      function(x) sqrt(wtd.var(x, w = aip_continuous$person_weight)))
+hybrid_w_sd <- sapply(hybrid_continuous[continuous_vars[-length(continuous_vars)]], 
+                         function(x) sqrt(wtd.var(x, w = hybrid_continuous$person_weight)))
+ar_w_sd <- sapply(ar_continuous[continuous_vars[-length(continuous_vars)]], 
+                     function(x) sqrt(wtd.var(x, w = ar_continuous$person_weight)))
+
+print(aip_w_sd)
+print(hybrid_w_sd)
+print(ar_w_sd)
+
+stargazer(as.data.frame(aip_continuous), type = "latex", digits = 1)
+stargazer(as.data.frame(hybrid_continuous), type = "latex", digits = 1)
+stargazer(as.data.frame(ar_continuous), type = "latex", digits = 1)
+
+## Categorical Variables ---------------------------------------------------
+vmt_weekly_df$age_group <- factor(vmt_weekly_df$age_group, c("18 to 34", "35 to 54", "55 or older"))
+vmt_weekly_df$income_detailed <- factor(vmt_weekly_df$income_detailed, 
+                                        c("<$50K", "$50-$100K", "$100-$150K", "$150-$200K", "$200K+", "Undisclosed"))
+# vmt_weekly_df$income_detailed <- relevel(vmt_weekly_df$income_detailed, ref = "$50-$100K")
+
+categorical_vars <- vmt_weekly_df %>%
+  select(work_arr, age_group, gender, employment, race, education, income_detailed, 
+         num_kids, num_vehicles, survey_year, person_weight)
+
+categorical_vars <- as.data.frame(categorical_vars[-1])
+
+
+for(i in colnames(categorical_vars[c(-1, -length(colnames(categorical_vars)))])){
+  print(categorical_vars %>%
+          group_by(work_arr, .data[[i]]) %>%
+          dplyr::summarize(count = n()) %>%
+          mutate(pct = count / sum(count)))
+}
+
+for(i in colnames(categorical_vars[c(-1, -length(colnames(categorical_vars)))])){
+  print(categorical_vars %>%
+          group_by(work_arr, .data[[i]]) %>%
+          dplyr::summarize(total_weighted_count = sum(person_weight, na.rm = TRUE),
+                           unweighted_count = n()) %>%
+          mutate(wtd_pct = (total_weighted_count / sum(total_weighted_count))))
+}
+
+
 vmt_weekly_df_mean <- vmt_weekly_df %>%
   group_by(work_arr) %>%
-  summarize(vmt_weekly_wtd_mean = weighted.mean(vmt_weekly, person_weight, na.rm = T),
+  dplyr::summarize(vmt_weekly_wtd_mean = weighted.mean(vmt_weekly, person_weight, na.rm = T),
             vmt_weekly_mean = mean(vmt_weekly, na.rm = T))
 
 vmt_weekly_df_mean_by_year <- vmt_weekly_df %>%
   group_by(work_arr, survey_year) %>%
-  summarize(vmt_weekly_wtd_mean = weighted.mean(vmt_weekly, person_weight, na.rm = T),
+  dplyr::summarize(vmt_weekly_wtd_mean = weighted.mean(vmt_weekly, person_weight, na.rm = T),
             vmt_weekly_mean = mean(vmt_weekly, na.rm = T))
 
 work_vmt_weekly_df_mean_by_year <- vmt_weekly_df %>%
   group_by(work_arr, survey_year) %>%
-  summarize(work_vmt_weekly_wtd_mean = weighted.mean(work_tour_vmt_weekly, person_weight, na.rm = T),
+  dplyr::summarize(work_vmt_weekly_wtd_mean = weighted.mean(work_tour_vmt_weekly, person_weight, na.rm = T),
             work_vmt_weekly_mean = mean(work_tour_vmt_weekly, na.rm = T))
 
 
 # Work Arrangement Pct by Year --------------------------------------------
 work_arr_by_year <- vmt_weekly_df %>% 
   group_by(survey_year, work_arr) %>%
-  summarize(count = n(), .groups = 'drop_last') %>%
+  dplyr::summarize(count = n(), .groups = 'drop_last') %>%
   mutate(pct = (count / sum(count))) %>%
   ungroup()
 
 work_arr_by_year_w <- vmt_weekly_df %>%
   group_by(survey_year, work_arr) %>%
-  summarize(
+  dplyr::summarize(
     total_weighted_count = sum(person_weight, na.rm = TRUE),
     .groups = "drop_last" 
   ) %>%
@@ -84,7 +160,7 @@ ggsave("./outputs/work_arr_by_year_w.jpg", width = 10, height = 6, units = "in")
 # Plot 2: VMT by Work Arrangement and VMT Type ----------------------------
 vmt_by_work_arr_vmt_type_w <- vmt_weekly_df %>%
   group_by(work_arr, survey_year) %>%
-  summarize(work_vmt_weekly_wtd_mean = weighted.mean(work_tour_vmt_weekly, person_weight, na.rm = T),
+  dplyr::summarize(work_vmt_weekly_wtd_mean = weighted.mean(work_tour_vmt_weekly, person_weight, na.rm = T),
             nonwork_tour_vmt_weekly_wtd_mean = weighted.mean(nonwork_tour_vmt_weekly, person_weight, na.rm = T)) %>%
   pivot_longer(cols = c(work_vmt_weekly_wtd_mean, nonwork_tour_vmt_weekly_wtd_mean),
                names_to = "vmt_type",
@@ -156,14 +232,14 @@ ggsave("./outputs/unweighted_vmt_weekly.jpg", width = 8, height = 6, units = "in
 ## Construct Data ----------------------------------------------------------
 weighted_commute_vmt <- vmt_weekly_df %>%
   group_by(work_arr, survey_year) %>%
-  summarize(w_mean_work_tour_vmt = weighted.mean(work_tour_vmt_weekly_df, person_weight, na.rm = T))
+  dplyr::summarize(w_mean_work_tour_vmt = weighted.mean(work_tour_vmt_weekly_df, person_weight, na.rm = T))
 
 weighted_commute_vmt$survey_year <- factor(weighted_commute_vmt$survey_year, c(2019, 2021, 2023))
 
 unweighted_commute_vmt <-  commute_vmt_weekly_df %>%
   left_join(work_arr) %>%
   group_by(work_arr, survey_year) %>%
-  summarize(u_mean_work_tour_vmt = mean(work_tour_vmt_weekly_df, na.rm = T))
+  dplyr::summarize(u_mean_work_tour_vmt = mean(work_tour_vmt_weekly_df, na.rm = T))
 
 unweighted_commute_vmt$survey_year <- factor(unweighted_commute_vmt$survey_year, c(2019, 2021, 2023))
 
@@ -187,7 +263,7 @@ vmt_weekly_df$nonwork_tour_vmt_weekly <- vmt_weekly_df$vmt_weekly - vmt_weekly_d
 ## Weighted ------------
 vmt_weekly_df_work_nonwork_w <- vmt_weekly_df %>%
   group_by(work_arr) %>%
-  summarize(work_vmt = weighted.mean(work_tour_vmt_weekly_df, person_weight, na.rm = T),
+  dplyr::summarize(work_vmt = weighted.mean(work_tour_vmt_weekly_df, person_weight, na.rm = T),
             nonwork_vmt = weighted.mean(nonwork_tour_vmt_weekly, person_weight, na.rm = T)) %>%
   gather(key = vmt_type, value = vmt_weekly, work_vmt:nonwork_vmt)
 
@@ -217,7 +293,7 @@ ggsave("./outputs/mean_weekly_work_nonwork_vmt_w.jpg", width = 8, height = 6, un
 ## Unweighted --------------------------------------------------------------
 vmt_weekly_df_work_nonwork_u <- vmt_weekly_df %>%
   group_by(work_arr, survey_year) %>%
-  summarize(work_vmt = mean(work_tour_vmt_weekly_df),
+  dplyr::summarize(work_vmt = mean(work_tour_vmt_weekly_df),
             nonwork_vmt = mean(nonwork_tour_vmt_weekly)) %>%
   gather(key = vmt_type, value = vmt_weekly, work_vmt:nonwork_vmt)
 
@@ -256,9 +332,9 @@ work_arr_purpose <- work_arr %>%
   select(person_id, work_arr, person_weight, vmt, d_purpose_category, survey_year) %>%
   filter(!d_purpose_category %in% c("Home", "Not imputable", "Missing: Non-response", "Change mode", "Other")) %>%
   group_by(person_id, work_arr, person_weight, survey_year, d_purpose_category) %>%
-  summarize(vmt_weekly_df = sum(vmt)) %>%
+  dplyr::summarize(vmt_weekly_df = sum(vmt)) %>%
   group_by(survey_year, work_arr, d_purpose_category) %>%
-  summarize(vmt_weekly_df_w = weighted.mean(vmt_weekly_df, person_weight, na.rm = T),
+  dplyr::summarize(vmt_weekly_df_w = weighted.mean(vmt_weekly_df, person_weight, na.rm = T),
             vmt_weekly_df_u = mean(vmt_weekly_df, na.rm = T))
 
 work_arr_purpose$survey_year <- factor(work_arr_purpose$survey_year, c(2019, 2021, 2023))
@@ -287,7 +363,7 @@ for(i in c(2019, 2021, 2023)){
 work_arr_emp_status_w <- work_arr_all %>%
   inner_join(person_weights) %>%
   group_by(survey_year, work_arr, employment) %>%
-  summarize(group_sum = sum(person_weight, na.rm = T)) %>%
+  dplyr::summarize(group_sum = sum(person_weight, na.rm = T)) %>%
   mutate(group_total = sum(group_sum),
          percent = group_sum / group_total)
 
@@ -295,7 +371,7 @@ work_arr_emp_status_w$survey_year <- factor(work_arr_emp_status_w$survey_year, c
 
 work_arr_emp_status_u <- work_arr_all %>%
   group_by(survey_year, work_arr, employment) %>%
-  summarize(count = n()) %>%
+  dplyr::summarize(count = n()) %>%
   mutate(percent = (count / sum(count))) 
 
 work_arr_emp_status_u$survey_year <- factor(work_arr_emp_status_u$survey_year, c(2019, 2021, 2023))
@@ -336,7 +412,7 @@ income_work_arr$income_broad <- factor(income_work_arr$income_broad,
 unique(income_work_arr$income_broad)
 income_work_arr <- income_work_arr %>%
   group_by(work_arr, survey_year, income_broad) %>% 
-  summarize(N = n(), wtd_N = sum(person_weight)) %>%
+  dplyr::summarize(N = n(), wtd_N = sum(person_weight)) %>%
   mutate(pct_u = N / sum(N), pct_w = wtd_N / sum(wtd_N)) %>%
   ungroup()
 
@@ -385,7 +461,7 @@ vmt_purpose_day_arr$work_arr_day <- factor(vmt_purpose_day_arr$work_arr_day, c("
 vmt_purpose_day_arr <- vmt_purpose_day_arr %>%
   filter(!d_purpose_category %in% c("Home", "Not imputable", "Missing: Non-response", "Change mode", "Other")) %>%
   group_by(work_arr_day, survey_year, d_purpose_category) %>%
-  summarize(weighted_vmt = weighted.mean(vmt, person_weight, na.rm = T),
+  dplyr::summarize(weighted_vmt = weighted.mean(vmt, person_weight, na.rm = T),
              unweighted_vmt = mean(vmt, na.rm = T)) %>%
   drop_na()
 
@@ -415,7 +491,7 @@ vmt_purpose_dow <- vmt_df %>%
   select(survey_year, person_id, person_weight, linked_trip_weight, d_purpose_category, travel_dow, vmt) %>%
   filter(!d_purpose_category %in% c("Home", "Not imputable", "Missing: Non-response", "Change mode", "Other")) %>%
   group_by(survey_year, d_purpose_category, travel_dow) %>%
-  summarize(weighted_vmt = weighted.mean(vmt, person_weight, na.rm = T),
+  dplyr::summarize(weighted_vmt = weighted.mean(vmt, person_weight, na.rm = T),
             unweighted_vmt = mean(vmt, na.rm = T))
   
 ## Plot Data ---------------------------------------------------------
@@ -443,7 +519,7 @@ day_arr_dow <- vmt_purpose_day_arr_step1 %>%
   select(survey_year, person_id, work_arr_day, travel_dow) %>%
   left_join(person_weights) %>%
   group_by(survey_year, travel_dow, work_arr_day) %>%
-  summarize(N = n(), wtd_N = sum(person_weight)) %>%
+  dplyr::summarize(N = n(), wtd_N = sum(person_weight)) %>%
   mutate(pct_u = N / sum(N), pct_w = wtd_N / sum(wtd_N)) %>%
   ungroup()
 

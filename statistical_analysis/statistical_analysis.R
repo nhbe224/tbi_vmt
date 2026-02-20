@@ -99,72 +99,75 @@ stargazer::stargazer(ols_model2, type = "latex", single.row = T)
 print(paste0("On average, always remote workers are associated with a ", round(100 * (exp(summary(ols_model2)$coefficients[2, 1]) - 1), 1), "% difference in weekly VMT relative to always in-person workers."))
 print(paste0("On average, hybrid workers are associated with a ", round(100 * (exp(summary(ols_model2)$coefficients[3, 1]) - 1), 1), "% difference in weekly VMT relative to always in-person workers."))
 
-# OPSR (MSP Data)  -------------------------------------
+vmt_weekly_model_mat$remote_day_pct_100 = vmt_weekly_model_mat$remote_day_pct * 100
+
+# OPSR Model 1  -------------------------------------------------
 opsr_model1_rep_eq <- work_arr | ln_vmt_weekly ~ 
   # Factors that affect work arrangement
+  ## Education
+  no_bach_plus + 
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
   hh_income_200plus + hh_income_undisclosed +
-  ## Education
-  no_bach_plus + 
   ## Employment Status
   employed_part_time + self_employed +
-  ## Other hybrid/remote workers
-  num_hybrid_or_remote + 
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed +
-  male:kids_1plus:year2021 |
+  year2021:self_employed + year2023:self_employed |
   # Factors affecting always in-person VMT
-  ## Employment status
-  employed_part_time + self_employed + 
   ## Gender
   male +
   ## Age
   age18to34 + age55plus +
-  ## Kids
-  kids_1plus +
   ## Race
   nonWhite +
   ## Number of vehicles
   vehicle1 + vehicle2plus +
+  ## Employment status
+  employed_part_time + self_employed + 
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote +
   ## Built Environment 
-  jobs_per_hh + intersection_den + emp8_ent +
+  ln_jobs_per_hh + ln_intersection_den + emp8_ent +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus +
-  male:kids_1plus:year2021 | 
+  year2021:self_employed + year2023:self_employed +
+  year2021:vehicle1 + year2023:vehicle1 +
+  year2021:vehicle2plus + year2023:vehicle2plus | 
   # Factors affecting hybrid VMT
   ## Education
   no_bach_plus +
-  ## Employment status 
+  ## Employment level
   employed_part_time + self_employed + 
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote +
   ## Built Environment 
-  jobs_per_hh + intersection_den +
+  ln_jobs_per_hh + ln_intersection_den + emp8_ent +
   ## Percentage of days worked remote
-  remote_day_pct +
+  remote_day_pct_100 +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus +
-  male:kids_1plus:year2021 |  
+  year2021:self_employed + year2023:self_employed |  
   # Factors affecting always remote VMT
+  ## Gender
+  male +
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
   hh_income_200plus + hh_income_undisclosed +
-  ## Gender
-  male +
-  ## Built Environment 
-  jobs_per_hh + intersection_den + emp8_ent +
   ## Kids
   kids_1plus +
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote +
+  ## Built Environment 
+  ln_jobs_per_hh + ln_intersection_den + emp8_ent +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus +
-  male:kids_1plus:year2021
+  male:kids_1plus:year2021 + 
+  male:kids_1plus:year2023
 
 ## Estimation
 opsr_model1_rep <- opsr(opsr_model1_rep_eq, vmt_weekly_model_mat, printLevel = 0)
@@ -174,8 +177,19 @@ opsr_model1_rep_te <- opsr_te(opsr_model1_rep, type = "unlog-response", weights 
 summary(opsr_model1_rep)
 texreg(opsr_model1_rep, single.row = T)
 print(opsr_model1_rep_te)
+screenreg(opsr_model1_rep, single.row = T)
+
 
 predict(opsr_model1_rep, group = 1, type = "unlog-response")
+
+
+## Confidence intervals
+rho1 <- c(-0.037789 -1.96*(0.145700), -0.037789 + 1.96*(0.145700))
+print(rho1)
+rho2 <- c(0.297488 - 1.96*(0.219460), 0.297488 + 1.96*(0.219460))
+print(rho2)
+rho3 <- c(0.131235 - 1.96*(0.343881), 0.131235 + 1.96*(0.343881))
+print(rho3)
 
 ## Calculate average treatment effect on treated
 ar_vmt_observed <- weighted.mean(predict(opsr_model1_rep, group = 3, type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
@@ -211,147 +225,391 @@ hybrid_treatment - aip_control
 (hybrid_treatment - aip_control) / aip_control
 
 texreg::screenreg(opsr_model1_rep, digits = 3, single.row = T)
-texreg::htmlreg(opsr_model1_rep, file = "./outputs/opsr_model_rep_vmt_weekly.htm", custom.model.names = c(""))
+
+# OPSR Model (2019)  -------------------------------------------------
+opsr_model2_rep_eq <- work_arr | ln_vmt_weekly ~ 
+  # Factors that affect work arrangement
+  ## Household Income
+  hh_income_under50 + hh_income100to150 + hh_income150to200 + 
+  hh_income_200plus + hh_income_undisclosed +
+  ## Education
+  no_bach_plus + 
+  ## Employment Status
+  employed_part_time + self_employed +
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote + 
+  male:kids_1plus |
+  # Factors affecting always in-person VMT
+  ## Employment status
+  employed_part_time + self_employed + 
+  ## Gender
+  male +
+  ## Age
+  age18to34 + age55plus +
+  ## Kids
+  kids_1plus +
+  ## Race
+  nonWhite +
+  ## Number of vehicles
+  vehicle1 + vehicle2plus +
+  ## Built Environment 
+  jobs_per_hh + intersection_den + emp8_ent +
+  ## Interactions
+  male:kids_1plus | 
+  # Factors affecting hybrid VMT
+  ## Education
+  no_bach_plus +
+  ## Employment status 
+  employed_part_time + self_employed + 
+  ## Built Environment 
+  jobs_per_hh + intersection_den +
+  ## Percentage of days worked remote
+  remote_day_pct +
+  male:kids_1plus |  
+  # Factors affecting always remote VMT
+  ## Household Income
+  hh_income_under50 + hh_income100to150 + hh_income150to200 + 
+  hh_income_200plus + hh_income_undisclosed +
+  ## Gender
+  male +
+  ## Built Environment 
+  jobs_per_hh + intersection_den + emp8_ent +
+  ## Kids
+  kids_1plus +
+  ## Interactions
+  male:kids_1plus
+
+## Estimation
+opsr_model2_rep <- opsr(opsr_model2_rep_eq, vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2019, ], printLevel = 0)
+## Treatment effects 
+opsr_model2_rep_te <- opsr_te(opsr_model2_rep, type = "unlog-response", weights = vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2019, ]$person_weight)
+## Inference
+summary(opsr_model2_rep)
+texreg(opsr_model2_rep, single.row = T)
+print(opsr_model2_rep_te)
+
+predict(opsr_model2_rep, group = 1, type = "unlog-response")
+
+## Calculate average treatment effect on treated
+ar_vmt_observed <- weighted.mean(predict(opsr_model2_rep, group = 3, type = "unlog-response"), w = vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2019, ]$person_weight, na.rm = T)
+ar_vmt_counterfact <- weighted.mean(predict(opsr_model2_rep, group = 3, counterfact = 1,  type = "unlog-response"), w = vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2019, ]$person_weight, na.rm = T)
+ar_vmt_observed
+ar_vmt_counterfact
+ar_vmt_observed - ar_vmt_counterfact
+(ar_vmt_observed - ar_vmt_counterfact) / ar_vmt_counterfact
+
+hybrid_vmt_observed <- weighted.mean(predict(opsr_model2_rep, group = 2, type = "unlog-response"), w = vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2019, ]$person_weight, na.rm = T)
+hybrid_vmt_counterfact <- weighted.mean(predict(opsr_model2_rep, group = 2, counterfact = 1,  type = "unlog-response"), w = vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2019, ]$person_weight, na.rm = T)
+hybrid_vmt_observed
+hybrid_vmt_counterfact
+hybrid_vmt_observed - hybrid_vmt_counterfact
+(hybrid_vmt_observed - hybrid_vmt_counterfact) / hybrid_vmt_counterfact
+
+## Calculate average treatment effect
+aip_vmt_observed <-  weighted.mean(predict(opsr_model2_rep, group = 1, type = "unlog-response"), w = vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2019, ]$person_weight, na.rm = T)
+ar_vmt_observed - aip_vmt_observed
+
+ar_treatment_mat <- opsr_model2_rep_te$ce.by.treatments[[3]]
+hybrid_treatment_mat <- opsr_model2_rep_te$ce.by.treatments[[2]] ## DF of treatment effects for hybrid
+aip_control_mat <- opsr_model2_rep_te$ce.by.treatments[[1]]
+
+
+## Column 1 is always in-person to hybrid (for observed AIP), column 2 is always in-person to hybrid (ATT)
+hybrid_treatment <- weighted.mean(hybrid_treatment_mat, w = rep(vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2019, ]$person_weight, 3), na.rm = T)
+aip_control <- weighted.mean(aip_control_mat, w = rep(vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2019, ]$person_weight, 3), na.rm = T)
+ar_treatment <- weighted.mean(ar_treatment_mat, w = rep(vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2019, ]$person_weight, 3), na.rm = T)
+ar_treatment - aip_control
+(ar_treatment - aip_control) / aip_control
+hybrid_treatment - aip_control
+(hybrid_treatment - aip_control) / aip_control
+
+texreg::screenreg(opsr_model2_rep, digits = 3, single.row = T)
+
+# OPSR Model (2021)  -------------------------------------------------
+opsr_model3_rep_eq <- work_arr | ln_vmt_weekly ~ 
+  # Factors that affect work arrangement
+  ## Household Income
+  hh_income_under50 + hh_income100to150 + hh_income150to200 + 
+  hh_income_200plus + hh_income_undisclosed +
+  ## Education
+  no_bach_plus + 
+  ## Employment Status
+  employed_part_time + self_employed +
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote + 
+  male:kids_1plus |
+  # Factors affecting always in-person VMT
+  ## Employment status
+  employed_part_time + self_employed + 
+  ## Gender
+  male +
+  ## Age
+  age18to34 + age55plus +
+  ## Kids
+  kids_1plus +
+  ## Race
+  nonWhite +
+  ## Number of vehicles
+  vehicle1 + vehicle2plus +
+  ## Built Environment 
+  jobs_per_hh + intersection_den + emp8_ent +
+  ## Interactions
+  male:kids_1plus | 
+  # Factors affecting hybrid VMT
+  ## Education
+  no_bach_plus +
+  ## Employment status 
+  employed_part_time + self_employed + 
+  ## Built Environment 
+  jobs_per_hh + intersection_den +
+  ## Percentage of days worked remote
+  remote_day_pct +
+  male:kids_1plus |  
+  # Factors affecting always remote VMT
+  ## Household Income
+  hh_income_under50 + hh_income100to150 + hh_income150to200 + 
+  hh_income_200plus + hh_income_undisclosed +
+  ## Gender
+  male +
+  ## Built Environment 
+  jobs_per_hh + intersection_den + emp8_ent +
+  ## Kids
+  kids_1plus +
+  ## Interactions
+  male:kids_1plus
+
+## Estimation
+opsr_model3_rep <- opsr(opsr_model3_rep_eq, vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2021, ], printLevel = 0)
+## Treatment effects 
+opsr_model3_rep_te <- opsr_te(opsr_model3_rep, type = "unlog-response", weights = vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2021, ]$person_weight)
+## Inference
+summary(opsr_model3_rep)
+texreg(opsr_model3_rep, single.row = T)
+print(opsr_model3_rep_te)
+
+predict(opsr_model3_rep, group = 1, type = "unlog-response")
+texreg::screenreg(opsr_model3_rep, digits = 3, single.row = T)
+
+# OPSR Model (2023)  -------------------------------------------------
+opsr_model4_rep_eq <- work_arr | ln_vmt_weekly ~ 
+  # Factors that affect work arrangement
+  ## Household Income
+  hh_income_under50 + hh_income100to150 + hh_income150to200 + 
+  hh_income_200plus + hh_income_undisclosed +
+  ## Education
+  no_bach_plus + 
+  ## Employment Status
+  employed_part_time + self_employed +
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote + 
+  male:kids_1plus |
+  # Factors affecting always in-person VMT
+  ## Employment status
+  employed_part_time + self_employed + 
+  ## Gender
+  male +
+  ## Age
+  age18to34 + age55plus +
+  ## Kids
+  kids_1plus +
+  ## Race
+  nonWhite +
+  ## Number of vehicles
+  vehicle1 + vehicle2plus +
+  ## Built Environment 
+  jobs_per_hh + intersection_den + emp8_ent +
+  ## Interactions
+  male:kids_1plus | 
+  # Factors affecting hybrid VMT
+  ## Education
+  no_bach_plus +
+  ## Employment status 
+  employed_part_time + self_employed + 
+  ## Built Environment 
+  jobs_per_hh + intersection_den +
+  ## Percentage of days worked remote
+  remote_day_pct +
+  male:kids_1plus |  
+  # Factors affecting always remote VMT
+  ## Household Income
+  hh_income_under50 + hh_income100to150 + hh_income150to200 + 
+  hh_income_200plus + hh_income_undisclosed +
+  ## Gender
+  male +
+  ## Built Environment 
+  jobs_per_hh + intersection_den + emp8_ent +
+  ## Kids
+  kids_1plus +
+  ## Interactions
+  male:kids_1plus
+
+## Estimation
+opsr_model4_rep <- opsr(opsr_model4_rep_eq, vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2023, ], printLevel = 0)
+## Treatment effects 
+opsr_model4_rep_te <- opsr_te(opsr_model4_rep, type = "unlog-response", weights = vmt_weekly_model_mat[vmt_weekly_model_mat[, "survey_year"] == 2023, ]$person_weight)
+## Inference
+summary(opsr_model4_rep)
+texreg(opsr_model4_rep, single.row = T)
+print(opsr_model4_rep_te)
+
+predict(opsr_model4_rep, group = 1, type = "unlog-response")
+
+texreg::screenreg(opsr_model4_rep, digits = 3, single.row = T)
+
+## Check treatment effects for each model
+print(opsr_model1_rep_te)
+print(opsr_model2_rep_te) # 2019
+print(opsr_model3_rep_te) # 2021
+print(opsr_model4_rep_te) # 2023
+
 
 
 # Rebound Effect ----------------------------------------------------------
-rebound_work_savings_eq <- work_arr | ln_work_tour_vmt_weekly ~ 
+## Decrease in Work VMT ----------------------
+rebound_work_decrease_eq <- work_arr | ln_work_tour_vmt_weekly ~ 
   # Factors that affect work arrangement
+  ## Education
+  no_bach_plus + 
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
   hh_income_200plus + hh_income_undisclosed +
-  ## Education
-  no_bach_plus + 
   ## Employment Status
   employed_part_time + self_employed +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus +
-  male:kids_1plus:year2021 |
+  year2021:self_employed + year2023:self_employed |
   # Factors affecting always in-person VMT
-  ## Employment status
-  employed_part_time + self_employed + 
   ## Gender
   male +
   ## Age
   age18to34 + age55plus +
-  ## Kids
-  kids_1plus +
   ## Race
   nonWhite +
   ## Number of vehicles
   vehicle1 + vehicle2plus +
+  ## Employment status
+  employed_part_time + self_employed + 
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote +
   ## Built Environment 
-  jobs_per_hh + intersection_den + emp8_ent +
+  ln_jobs_per_hh + ln_intersection_den + emp8_ent +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed +
-  male:kids_1plus:year2021 | 
+  year2021:self_employed + year2023:self_employed +
+  year2021:vehicle1 + year2023:vehicle1 +
+  year2021:vehicle2plus + year2023:vehicle2plus | 
   # Factors affecting hybrid VMT
   ## Education
   no_bach_plus +
-  ## Employment status 
+  ## Employment level
   employed_part_time + self_employed + 
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote +
   ## Built Environment 
-  jobs_per_hh + intersection_den +
+  ln_jobs_per_hh + ln_intersection_den + emp8_ent +
   ## Percentage of days worked remote
-  remote_day_pct +
+  remote_day_pct_100 +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus +
-  male:kids_1plus:year2021 |  
+  year2021:self_employed + year2023:self_employed |  
   # Factors affecting always remote VMT
+  ## Gender
+  male +
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
   hh_income_200plus + hh_income_undisclosed +
-  ## Gender
-  male +
-  ## Built Environment 
-  jobs_per_hh + intersection_den + emp8_ent +
   ## Kids
   kids_1plus +
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote +
+  ## Built Environment 
+  ln_jobs_per_hh + ln_intersection_den + emp8_ent +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus +
-  male:kids_1plus:year2021
+  male:kids_1plus:year2021 + 
+  male:kids_1plus:year2023
 
 ## Estimation
-rebound_work_savings <- opsr(rebound_work_savings_eq, vmt_weekly_model_mat, printLevel = 0)
+rebound_work_decrease <- opsr(rebound_work_decrease_eq, vmt_weekly_model_mat, printLevel = 0)
 ## Treatment effects 
-rebound_work_savings_te <- opsr_te(rebound_work_savings, type = "unlog-response", weights = vmt_weekly_model_mat$person_weight)
+rebound_work_decrease_te <- opsr_te(rebound_work_decrease, type = "unlog-response", weights = vmt_weekly_model_mat$person_weight)
 
-summary(rebound_work_savings)
-print(rebound_work_savings_te)
-rebound_work_savings_te$ce.by.treatments[[1]]
-texreg(rebound_work_savings, single.row = T, file = "./rebound_work_decrease.tex")
+summary(rebound_work_decrease)
+print(rebound_work_decrease_te)
+rebound_work_decrease_te$ce.by.treatments[[1]]
+texreg(rebound_work_decrease, single.row = T)
 
+## Increase in Non-Work VMT --------------------
 rebound_nonwork_increase_eq <- work_arr | ln_nonwork_tour_vmt_weekly ~ 
   # Factors that affect work arrangement
+  ## Education
+  no_bach_plus + 
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
   hh_income_200plus + hh_income_undisclosed +
-  ## Education
-  no_bach_plus + 
   ## Employment Status
   employed_part_time + self_employed +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus +
-  male:kids_1plus:year2021 |
+  year2021:self_employed + year2023:self_employed |
   # Factors affecting always in-person VMT
-  ## Employment status
-  employed_part_time + self_employed + 
   ## Gender
   male +
   ## Age
   age18to34 + age55plus +
-  ## Kids
-  kids_1plus +
   ## Race
   nonWhite +
   ## Number of vehicles
   vehicle1 + vehicle2plus +
+  ## Employment status
+  employed_part_time + self_employed + 
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote +
   ## Built Environment 
-  jobs_per_hh + intersection_den + emp8_ent +
+  ln_jobs_per_hh + ln_intersection_den + emp8_ent +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus +
-  male:kids_1plus:year2021 | 
+  year2021:self_employed + year2023:self_employed +
+  year2021:vehicle1 + year2023:vehicle1 +
+  year2021:vehicle2plus + year2023:vehicle2plus | 
   # Factors affecting hybrid VMT
   ## Education
   no_bach_plus +
-  ## Employment status 
+  ## Employment level
   employed_part_time + self_employed + 
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote +
   ## Built Environment 
-  jobs_per_hh + intersection_den +
+  ln_jobs_per_hh + ln_intersection_den + emp8_ent +
   ## Percentage of days worked remote
-  remote_day_pct +
+  remote_day_pct_100 +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus +
-  male:kids_1plus:year2021 |  
+  year2021:self_employed + year2023:self_employed |  
   # Factors affecting always remote VMT
+  ## Gender
+  male +
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
   hh_income_200plus + hh_income_undisclosed +
-  ## Gender
-  male +
-  ## Built Environment 
-  jobs_per_hh + intersection_den + emp8_ent +
   ## Kids
   kids_1plus +
+  ## Other hybrid/remote workers
+  num_hybrid_or_remote +
+  ## Built Environment 
+  ln_jobs_per_hh + ln_intersection_den + emp8_ent +
   ## Year
   year2021 + year2023 +
   ## Interactions
-  year2021:self_employed + year2021:vehicle2plus +
-  male:kids_1plus:year2021
+  male:kids_1plus:year2021 + 
+  male:kids_1plus:year2023
 
 ## Estimation
 rebound_nonwork_increase <- opsr(rebound_nonwork_increase_eq, vmt_weekly_model_mat, printLevel = 0)
@@ -359,14 +617,13 @@ rebound_nonwork_increase <- opsr(rebound_nonwork_increase_eq, vmt_weekly_model_m
 rebound_nonwork_increase_te <- opsr_te(rebound_nonwork_increase, type = "unlog-response", weights = vmt_weekly_model_mat$person_weight)
 
 summary(rebound_nonwork_increase)
-texreg(rebound_nonwork_increase, single.row = T, file = "./rebound_nonwork_increase.tex")
+texreg(rebound_nonwork_increase, single.row = T)
 
-
-print(rebound_work_savings_te)
 print(rebound_nonwork_increase_te)
+print(rebound_work_decrease_te)
 
-ar_work_vmt_observed <- weighted.mean(predict(rebound_work_savings, group = 3, type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
-ar_work_vmt_counterfact <- weighted.mean(predict(rebound_work_savings, group = 3, counterfact = 1,  type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
+ar_work_vmt_observed <- weighted.mean(predict(rebound_work_decrease, group = 3, type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
+ar_work_vmt_counterfact <- weighted.mean(predict(rebound_work_decrease, group = 3, counterfact = 1,  type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
 ar_work_vmt_observed
 ar_work_vmt_counterfact
 ar_work_vmt_observed - ar_work_vmt_counterfact
@@ -377,13 +634,12 @@ ar_nonwork_vmt_observed
 ar_nonwork_vmt_counterfact
 ar_nonwork_vmt_observed - ar_nonwork_vmt_counterfact
 
-### Work VMT Savings / Non-Work VMT Increase
+### Work VMT decrease / Non-Work VMT Increase
 abs((ar_nonwork_vmt_observed - ar_nonwork_vmt_counterfact) / (ar_work_vmt_observed - ar_work_vmt_counterfact))
-((ar_work_vmt_observed - ar_work_vmt_counterfact) / ar_work_vmt_counterfact) / ((ar_nonwork_vmt_observed - ar_nonwork_vmt_counterfact) / ar_nonwork_vmt_counterfact)
-## Work savings > increase in non-work VMT
+## Work decrease > increase in non-work VMT
 
-hybrid_work_vmt_observed <- weighted.mean(predict(rebound_work_savings, group = 2, type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
-hybrid_work_vmt_counterfact <- weighted.mean(predict(rebound_work_savings, group = 2, counterfact = 1,  type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
+hybrid_work_vmt_observed <- weighted.mean(predict(rebound_work_decrease, group = 2, type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
+hybrid_work_vmt_counterfact <- weighted.mean(predict(rebound_work_decrease, group = 2, counterfact = 1,  type = "unlog-response"), w = vmt_weekly_model_mat$person_weight, na.rm = T)
 hybrid_work_vmt_observed
 hybrid_work_vmt_counterfact
 hybrid_work_vmt_observed - hybrid_work_vmt_counterfact
@@ -394,10 +650,9 @@ hybrid_nonwork_vmt_observed
 hybrid_nonwork_vmt_counterfact
 hybrid_nonwork_vmt_observed - hybrid_nonwork_vmt_counterfact
 
-### Work VMT Savings / Non-work VMT Increase
+### Work VMT decrease / Non-work VMT Increase
 abs((hybrid_nonwork_vmt_observed - hybrid_nonwork_vmt_counterfact) / (hybrid_work_vmt_observed - hybrid_work_vmt_counterfact))
 
-## Work savings > increase in non-work VMT
 
 # Displacement Model ---------------------------------------------------
 ## Model 1 -------------------------------------------------------------
@@ -931,14 +1186,14 @@ writeData(wb, "model5_opsr", te_summary, startCol = 1, startRow = nrow(coeffs) +
 ## Model type: OPSR
 ## Specification: Non-work VMT on other days as a function of weekly work arrangement and on other days.
 ## Workers: All
-### Part 1: Daily Savings ---------------------------------------
+### Part 1: Daily decrease ---------------------------------------
 vmt_daily_model_mat$work_arr_day <- factor(vmt_daily_model_mat$work_arr_day, levels = c(1, 2, 3))
 vmt_daily_model_mat$in_person_day <- ifelse(vmt_daily_model_mat$work_arr_day == 1, 1, 0)
 vmt_daily_model_mat$remote_day <- ifelse(vmt_daily_model_mat$work_arr_day == 2, 1, 0)
 vmt_daily_model_mat$no_work_day  <- ifelse(vmt_daily_model_mat$work_arr_day == 3, 1, 0)
 vmt_daily_model_mat$travel_dow <-relevel(vmt_daily_model_mat$travel_dow, ref = "Wednesday")
 
-rebound_work_savings_daily_eq <- work_arr | ln_work_tour_vmt_daily ~ 
+rebound_work_decrease_daily_eq <- work_arr | ln_work_tour_vmt_daily ~ 
   # Factors that affect work arrangement
   ## Household Income
   hh_income_under50 + hh_income100to150 + hh_income150to200 + 
@@ -1005,12 +1260,12 @@ rebound_work_savings_daily_eq <- work_arr | ln_work_tour_vmt_daily ~
   year2021 + year2023
 
 ## Estimation
-rebound_work_savings_daily <- opsr(rebound_work_savings_daily_eq, vmt_daily_model_mat, printLevel = 0)
-summary(rebound_work_savings_daily)
+rebound_work_decrease_daily <- opsr(rebound_work_decrease_daily_eq, vmt_daily_model_mat, printLevel = 0)
+summary(rebound_work_decrease_daily)
 
 ## Treatment effects 
-rebound_work_savings_daily_te <- opsr_te(rebound_work_savings_daily, type = "unlog-response", weights = vmt_daily_model_mat$person_weight)
-print(rebound_work_savings_daily_te)
+rebound_work_decrease_daily_te <- opsr_te(rebound_work_decrease_daily, type = "unlog-response", weights = vmt_daily_model_mat$person_weight)
+print(rebound_work_decrease_daily_te)
 
 ### Part 2: Increase in Non-Work VMT -----------------------------------------
 rebound_nonwork_increase_daily_eq <- work_arr | ln_nonwork_tour_vmt_daily ~ 
@@ -1098,13 +1353,13 @@ summary(rebound_nonwork_increase_daily)
 rebound_nonwork_increase_daily_te <- opsr_te(rebound_nonwork_increase_daily, type = "unlog-response", weights = vmt_daily_model_mat$person_weight)
 print(rebound_nonwork_increase_daily_te)
 
-print(rebound_work_savings_daily_te)
+print(rebound_work_decrease_daily_te)
 print(rebound_nonwork_increase_daily_te)
 
 ## Get data for worksheet
-te_summary_decrease <- summary(rebound_work_savings_daily_te)$te
+te_summary_decrease <- summary(rebound_work_decrease_daily_te)$te
 te_summary_increase <- summary(rebound_nonwork_increase_daily_te)$te
-rebound_work_decrease_daily_summary <- summary(rebound_work_savings_daily)
+rebound_work_decrease_daily_summary <- summary(rebound_work_decrease_daily)
 rebound_nonwork_increase_daily_summary <- summary(rebound_nonwork_increase_daily)
 
 ## Prepare data for worksheet
@@ -1117,9 +1372,9 @@ coeffs <- coeffs %>%
   select(Terms, Estimate, `Standard Error`, `t-statistic`, `p-value`)
 
 
-stats <- data.frame("nObs_always_in_person" = rebound_work_savings_daily$nObs[2],
-                    "nObs_hybrid" = rebound_work_savings_daily$nObs[3],
-                    "nObs_always_remote" = rebound_work_savings_daily$nObs[4],
+stats <- data.frame("nObs_always_in_person" = rebound_work_decrease_daily$nObs[2],
+                    "nObs_hybrid" = rebound_work_decrease_daily$nObs[3],
+                    "nObs_always_remote" = rebound_work_decrease_daily$nObs[4],
                     "AIC" = rebound_work_decrease_daily_summary$GOF$AIC[1],
                     "BIC" = rebound_work_decrease_daily_summary$GOF$BIC,
                     "r-squared" = rebound_work_decrease_daily_summary$GOFcomponents$R2[1])
@@ -1178,7 +1433,6 @@ start_default <- opsr(f, telework_data, .get2step = TRUE)
 fit <- opsr(f, telework_data, start = start_default, method = "NM", iterlim = 50e3, printLevel = 0)
 summary(fit)
 print(opsr_te(fit, type = "unlog-response", weights = telework_data$weight))
-print(opsr_te(fit, type = "response", weights = telework_data$weight))
 
 ## ATT
 exp(-0.11) - 1

@@ -421,6 +421,11 @@ sld2018 <- fread("D:/neeco/rdc_census/sld_change_file/outputs/sld_change_file201
 mn_transit2021_load <- fread("D:/neeco/rdc_census/aaa_change_file/inputs/transit2021/Minnesota_27_transit_block_group_2021.csv")
 wi_transit2021_load <- fread("D:/neeco/rdc_census/aaa_change_file/inputs/transit2021/Wisconsin_55_transit_block_group_2021.csv")
 transit2021_load <- rbind(mn_transit2021_load, wi_transit2021_load)
+transit2021 <- transit2021_load %>%
+  filter(threshold == 1800) %>%
+  select(geoid, weighted_average) %>%
+  rename(home_bg_2010 = geoid, transit_jobs30 = weighted_average) %>%
+  mutate(home_bg_2010 = as.character(home_bg_2010))
 transitAll <- read.dta("D:/neeco/rdc_census/to_rdc/transit_ALL.dta")
 transitAll <- transitAll %>%
   select(-threshold) %>%
@@ -577,10 +582,7 @@ vmt_weekly_w_be <- vmt_weekly_w_hh %>%
 vmt_weekly_w_be$home_bg_2010 <- as.character(vmt_weekly_w_be$home_bg_2010)
 
 vmt_weekly_w_be <- vmt_weekly_w_be %>%
-  left_join(transitAll, by = c("home_bg_2010" = "bg2010", "survey_year" = "year"))
-
-vmt_weekly_w_be <- vmt_weekly_w_be %>%
-  rename(transit_jobs30 = jobs)
+  left_join(transit2021)
 
 # Get the home BG where transit jobs is NA, fill with previous years' values
 na_home_bg <- vmt_weekly_w_be[is.na(vmt_weekly_w_be$transit_jobs30), ]$home_bg_2010
@@ -705,6 +707,12 @@ travel_times_df <- travel_times_df %>%
 vmt_weekly_for_model$ln_vmt_weekly <- log(vmt_weekly_for_model$vmt_weekly + 1)
 vmt_weekly_for_model$ln_work_tour_vmt_weekly <- log(vmt_weekly_for_model$work_tour_vmt_weekly + 1)
 vmt_weekly_for_model$ln_nonwork_tour_vmt_weekly <- log(vmt_weekly_for_model$nonwork_tour_vmt_weekly + 1)
+
+
+# Log BE variables --------------------------------------------------------
+vmt_weekly_for_model$ln_jobs_per_hh <- log(vmt_weekly_model_mat$jobs_per_hh + 1)
+vmt_weekly_for_model$ln_intersection_den <- log(vmt_weekly_model_mat$intersection_den)
+
 
 ## Relevel variables -------------------------------------------------------
 vmt_weekly_for_model$age_group <- relevel(vmt_weekly_for_model$age_group, ref = "35 to 54")
