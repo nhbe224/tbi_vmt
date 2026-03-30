@@ -19,6 +19,7 @@ vmt_daily_df <- vmt_files[["vmt_daily_df"]]
 vmt_weekly_model_mat <- vmt_files[["vmt_weekly_model_mat"]]
 vmt_daily_model_mat <- vmt_files[["vmt_daily_model_mat"]]
 vmt_displacement <- vmt_files[["vmt_displacement"]]
+work_arr_by_region_load <- read.csv("./work_arr_by_region.csv")
 
 
 # Summary Tables ----------------------------------------------------------
@@ -203,45 +204,37 @@ ggplot(vmt_by_work_arr_vmt_type_w, aes(x = factor(survey_year), y = vmt, fill = 
 ggsave("./outputs/vmt_by_work_arr_vmt_type_w.jpg", width = 10, height = 6, units = "in")
 
 
-# Plot Mean Weekly VMT by Work Arrangement (weighted) ------------------------
-ggplot(vmt_weekly_df_mean, aes(fill = work_arr, x = work_arr, y = vmt_weekly_wtd_mean)) + 
-  geom_bar(position="dodge", stat="identity") + ggtitle("Average Weekly VMT by Work Arrangement (Weighted)") +
-  xlab("Work Arrangement") + ylab("Average Weekly VMT") + guides(fill=guide_legend(title="")) + theme(legend.position="bottom") +
-  geom_text(aes(label = round(vmt_weekly_wtd_mean)), size = 4, vjust = -0.25, position = position_dodge(.9)) +
-  ylim(0, 215)
-ggsave("./outputs/weighted_vmt_weekly_no_year.jpg", width = 8, height = 6, units = "in")
+# Plot 3: Work Arrangement by Region ------------------------------------------
+work_arr_by_region <- work_arr_by_region_load %>%
+  mutate(wtd_pct_text_step1 = paste0(round(pct*100, 0), "%"),
+         wtd_pct_text = ifelse(pct > 0.1, wtd_pct_text_step1, ""),
+         region_year = str_replace(region_year, " (?=\\d)", "\n")) %>%
+  ungroup()
 
 
-# Plot Mean Weekly VMT by Work Arrangement and Year (Weighted) ------------
-ggplot(vmt_weekly_df_mean_by_year, aes(fill = work_arr, x = survey_year, y = vmt_weekly_wtd_mean)) + 
-  geom_bar(position="dodge", stat="identity") + ggtitle("Average Weekly VMT by Work Arrangement (Weighted)") +
-  xlab("Year") + ylab("Average Weekly VMT") + guides(fill=guide_legend(title="")) + theme(legend.position="bottom") +
-  geom_text(aes(label = round(vmt_weekly_wtd_mean)), size = 3, vjust = -0.25, position = position_dodge(.9)) +
-  ylim(0, 215)
-ggsave("./outputs/weighted_vmt_weekly.jpg", width = 8, height = 6, units = "in")
+work_arr_by_region$region_year <- factor(work_arr_by_region$region_year, levels = c("Bay Area\n2019", "Seattle\n2019", 
+                                                                                    "Minneapolis\n2019", 
+                                           "Bay Area\n2023", "Seattle\n2023", "Minneapolis\n2023"))
 
-# Plot Mean Weekly VMT by Work Arrangement and Year (Unweighted) ------------
-ggplot(vmt_weekly_df_mean_by_year, aes(fill = work_arr, x = survey_year, y = vmt_weekly_mean)) + 
-  geom_bar(position="dodge", stat="identity") + ggtitle("Average Weekly VMT by Work Arrangement (Unweighted)") +
-  xlab("Year") + ylab("Average Weekly VMT") + guides(fill=guide_legend(title="")) + theme(legend.position="bottom") +
-  geom_text(aes(label = round(vmt_weekly_mean)), size = 3, vjust = -0.25, position = position_dodge(.9)) +
-  ylim(0, 205)
-ggsave("./outputs/unweighted_vmt_weekly.jpg", width = 8, height = 6, units = "in")
+work_arr_by_region$work_arr <- factor(work_arr_by_region$work_arr, levels = c("Always In-Person", "Hybrid", "Always Remote"))
 
-# Average Work Tour VMT by Work Arrangement -------------------------------------
-## Construct Data ----------------------------------------------------------
-weighted_commute_vmt <- vmt_weekly_df %>%
-  group_by(work_arr, survey_year) %>%
-  dplyr::summarize(w_mean_work_tour_vmt = weighted.mean(work_tour_vmt_weekly_df, person_weight, na.rm = T))
+ggplot(work_arr_by_region, aes(x = region_year, y = pct*100, fill = work_arr)) +
+  geom_col(position = "stack", width = 0.5) + 
+  geom_text(aes(label = wtd_pct_text),
+            position = position_stack(vjust = 0.5),
+            color = "white",
+            size = 4,
+            fontface = "bold") +
+  labs(title = "Observed Distribution of Work Arrangements by Year and Region",
+       x = "Region/Year",
+       y = "Percent",
+       fill = "Work Arrangement") +
+  scale_fill_manual(values = c("Always In-Person" = "gray45", 
+                               "Hybrid" = "darkmagenta", 
+                               "Always Remote" = "darkorange1"))
 
-weighted_commute_vmt$survey_year <- factor(weighted_commute_vmt$survey_year, c(2019, 2021, 2023))
+ggsave("./outputs/work_arr_by_region.jpg", width = 10, height = 6, units = "in")
 
-unweighted_commute_vmt <-  commute_vmt_weekly_df %>%
-  left_join(work_arr) %>%
-  group_by(work_arr, survey_year) %>%
-  dplyr::summarize(u_mean_work_tour_vmt = mean(work_tour_vmt_weekly_df, na.rm = T))
-
-unweighted_commute_vmt$survey_year <- factor(unweighted_commute_vmt$survey_year, c(2019, 2021, 2023))
 
 ## Plot Data ----------------------------------------------------------
 ggplot(weighted_commute_vmt, aes(fill = work_arr, x = survey_year, y = w_mean_work_tour_vmt)) + 
@@ -545,10 +538,4 @@ for(i in c(2019, 2021, 2023)){
           ylim(0, 1))
 }
 
-
-#### Notes
-## Day of week and Day Arrangement percentages (i.e. trip purpose, break out by day arrangement).
-## Work Arrangement by Day Arrangement by DOW.
-## Look at Python script to get tour ID. Get tour purpose.
-##### Hierarchy: work, work-related, escort, maintenance activities (shopping, errands, etc.), discretionary (meals, social)
 

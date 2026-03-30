@@ -1,6 +1,7 @@
 ### Data Cleaning for TBI VMT
 ### Inputs: Raw TBI Survey Data
-### Outputs: VMT weekly, VMT daily, VMT for displacement
+### Outputs: VMT weekly, VMT daily, VMT for displacement (future work)
+
 # Set Working Directory ---------------------------------------------------
 setwd("D:/neeco/thesis/tbi_vmt/datacleaning")
 
@@ -23,6 +24,7 @@ fill_nearest = function(x){
 }
 
 # Globals -----------------------------------------------------------------
+## This sets the threshold for remote work
 twork_limit_daily <- 1
 
 # Load in Data ------------------------------------------------------------
@@ -90,33 +92,31 @@ rm(day_2019, day_2021, day_2023)
 
 # Combine Data ------------------------------------------------------------
 ## This part is adapted from VMT Mode Shift, Clean and Decode TBI from Dr. Greg Erhardt
-linkedtrip_combined <- left_join(linkedtrip_all, day_all, by=c('survey_year', 'hh_id', 'person_id', 'day_num', 'day_id')) %>%
-  left_join(., person_all, by=c('survey_year', 'hh_id', 'person_id')) %>%
-  left_join(., household_all, by =c('survey_year','hh_id'))
+print(intersect(colnames(linkedtrip_all), colnames(day_all)))
+print(intersect(colnames(person_all), colnames(linkedtrip_all)))
+print(intersect(colnames(person_all), colnames(day_all)))
+print(intersect(colnames(household_all), colnames(day_all)))
+print(intersect(colnames(household_all), colnames(linkedtrip_all)))
+print(intersect(colnames(household_all), colnames(person_all)))
+
+linkedtrip_combined <- left_join(linkedtrip_all, day_all, by=c('survey_year', 'hh_id', 'person_id', 'day_num', 'day_id', 'person_num')) %>%
+  left_join(., person_all, by=c('survey_year', 'hh_id', 'person_id', 'person_num', 'participation_group')) %>%
+  left_join(., household_all, by =c('survey_year','hh_id', 'participation_group', 'home_park_other', 'num_days_complete'))
+
+unique(linkedtrip_combined$survey_year)
 
 ## Drop duplicates
+ncol(linkedtrip_combined)
 linkedtrip_combined <- linkedtrip_combined %>% select(-contains(".y"))
-
-## Rename columns that contain .x
-names(linkedtrip_combined) <- gsub("\\.x", "", names(linkedtrip_combined))
-
-## Check for more duplicates
+ncol(linkedtrip_combined)
 which(duplicated(names(linkedtrip_combined)))
-grep("person_num", colnames(linkedtrip_combined))
-grep("participation_group", colnames(linkedtrip_combined))
-#View(linkedtrip_combined[, c(120, 409)]) ## Drop 120 since 409 is more full.
-#View(linkedtrip_combined[, c(4, 180)]) ## Drop 180 since 4 is more full
-sum(linkedtrip_combined[, 4] == linkedtrip_combined[, 180], na.rm = T) ## Drop either since both columns are equivalent.
-
-## Drop based on above.
-linkedtrip_combined <- linkedtrip_combined %>%
-  select(-120, -180)
 
 ## Keep relevant columns
 linkedtrip_combined <- linkedtrip_combined %>%
   select(-contains(c("commute_subsidy", "ev_charge", "hh_member", "num_complete", "race", "school", "share", "transportation_barriers", "prev_res", "micromobility", "num_days_complete")))
 
 sort(colnames(linkedtrip_combined))
+unique(linkedtrip_combined$survey_year)
 
 # Clean Data --------------------------------------------------------------
 ## Calculate VMT ----------------------------------------------------------
@@ -126,7 +126,7 @@ linkedtrip_combined$vehicle_trips = linkedtrip_combined$vehicle_trip_flag / link
 
 # Calculate VMT
 linkedtrip_combined$vmt = linkedtrip_combined$vehicle_trips * linkedtrip_combined$distance_miles
-
+unique(linkedtrip_combined$survey_year)
 ## Exclusions -------------------------------------------------------------
 ## First, exclude trips with missing block groups and timestamp
 print(paste0('Trips before exclusions: ', nrow(linkedtrip_combined), ", VMT before exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
@@ -135,6 +135,7 @@ linkedtrip_combined <- linkedtrip_combined %>%
   filter(if_all(c(trip_o_cbg_2010, trip_d_cbg_2010, depart_time, arrive_time), negate(is.na)))
 
 print(paste0('Trips after exclusions: ', nrow(linkedtrip_combined), ", VMT after exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
+unique(linkedtrip_combined$survey_year)
 
 ## Then, filter out trips where home location is not within the study counties.
 print(paste0('Trips before exclusions: ', nrow(linkedtrip_combined), ", VMT before exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
@@ -151,8 +152,7 @@ linkedtrip_combined$trip_d_county <- gsub('.{3}$', '', linkedtrip_combined$trip_
 
 
 linkedtrip_combined <- linkedtrip_combined %>%
-  filter(home_county %in% study_area_counties,
-         trip_o_county %in% study_area_counties,
+  filter(trip_o_county %in% study_area_counties,
          trip_d_county %in% study_area_counties)
 
 print(paste0('Trips after exclusions: ', nrow(linkedtrip_combined), ", VMT after exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
@@ -211,14 +211,14 @@ linkedtrip_combined <- linkedtrip_combined %>%
 print(paste0('Trips after vacation exclusions: ', nrow(linkedtrip_combined), ", VMT after exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
 
 
-# Write out data to CSV ---------------------------------------------------
+# Keep relevant columns ---------------------------------------------------
 linkedtrip_combined <- linkedtrip_combined %>%
   select(survey_year, person_id, hh_id, day_id, age, can_drive, day_num, linked_trip_id, travel_dow, depart_time, arrive_time, 
          vmt, linked_trip_weight, person_weight, hh_weight, income_broad, o_purpose, o_purpose_category, d_purpose, d_purpose_category, depart_hour, arrive_hour)
 
 vmt_df <- linkedtrip_combined
 
-# Get a dataset of AIP, Hybrid, and AR -------------------------------------
+# Get a dataset of work arrangement  -------------------------------------
 ## Filter for those with 7 days of travel data and in rMove ------------------
 trip_complete <- linkedtrip_all %>%
   group_by(person_id) %>% 
@@ -273,7 +273,7 @@ work_arr_daily <- trip_step3 %>%
 
 work_arr <- work_arr_daily %>%
   group_by(person_id, survey_year, work_arr_day, employment, job_type) %>%
-  summarize(count = n()) %>%
+  dplyr::summarize(count = n()) %>%
   pivot_wider(names_from = work_arr_day, values_from = count) %>% 
   replace(is.na(.), 0) %>% ## Part 2
   filter(no_work_day != 7) %>%
@@ -309,7 +309,7 @@ telework_hours_per_week$telework_time <- ifelse(telework_hours_per_week$survey_y
 
 telework_hours_per_week <- telework_hours_per_week %>%
   group_by(person_id, survey_year) %>%
-  summarize(telework_hours = sum(telework_time, na.rm = T))
+  dplyr::summarize(telework_hours = sum(telework_time, na.rm = T))
 
 work_arr <- work_arr %>%
   left_join(telework_hours_per_week)
@@ -369,23 +369,21 @@ commute_vmt$nonwork_tour_vmt <- ifelse(commute_vmt$work_tour == 0, commute_vmt$v
 commute_vmt_daily <- commute_vmt %>%
   select(person_id, day_num, work_tour, work_tour_vmt, nonwork_tour_vmt, person_weight, survey_year, travel_dow) %>%
   group_by(person_id, day_num, travel_dow, person_weight, survey_year) %>%
-  summarize(work_tour_vmt_daily = sum(work_tour_vmt),
+  dplyr::summarize(work_tour_vmt_daily = sum(work_tour_vmt),
             nonwork_tour_vmt_daily = sum(nonwork_tour_vmt)) 
 
 commute_vmt_daily$person_id <- as.numeric(commute_vmt_daily$person_id)
 commute_vmt_daily$survey_year <- factor(commute_vmt_daily$survey_year)
 
-#write.csv(commute_vmt_daily, "./outputs/commute_vmt_daily.csv", row.names = F)
-
 commute_vmt_weekly <- commute_vmt %>%
   select(person_id, survey_year, work_tour, work_tour_vmt, person_weight) %>%
   group_by(person_id, survey_year, person_weight) %>%
-  summarize(work_tour_vmt_weekly = sum(work_tour_vmt))
+  dplyr::summarize(work_tour_vmt_weekly = sum(work_tour_vmt))
 
 ## Join Commute VMT weekly -------------------------------------------------
 vmt_weekly <- vmt_by_work_arr %>%
   group_by(person_id, work_arr, person_weight, survey_year, total_work_days, remote_day, remote_day_pct, remote_day_factor, remote_day_pct_factor) %>%
-  summarize(vmt_weekly = sum(vmt, na.rm = T)) %>%
+  dplyr::summarize(vmt_weekly = sum(vmt, na.rm = T)) %>%
   rename(num_remote_days = remote_day)
 
 vmt_weekly <- vmt_weekly %>%
@@ -424,8 +422,7 @@ transit2021_load <- rbind(mn_transit2021_load, wi_transit2021_load)
 transit2021 <- transit2021_load %>%
   filter(threshold == 1800) %>%
   select(geoid, weighted_average) %>%
-  rename(home_bg_2010 = geoid, transit_jobs30 = weighted_average) %>%
-  mutate(home_bg_2010 = as.character(home_bg_2010))
+  rename(home_bg_2010 = geoid, transit_jobs30 = weighted_average)
 transitAll <- read.dta("D:/neeco/rdc_census/to_rdc/transit_ALL.dta")
 transitAll <- transitAll %>%
   select(-threshold) %>%
@@ -443,7 +440,7 @@ vmt_weekly <- vmt_weekly %>%
 ## Join on person variables that are relevant to VMT -----------------------
 ### First find the variables in person that are relevant to VMT
 person_keep <- person_all %>%
-  select(survey_year, person_id, person_weight, hh_id, age, gender, employment, education,  race, work_cbg_2010)
+  select(survey_year, person_id, person_weight, hh_id, age, gender, employment, education,  race, ethnicity, work_cbg_2010, job_type_pre_covid)
 person_keep$person_id <- as.numeric(person_keep$person_id)
 
 ### Then join on VMT
@@ -473,6 +470,10 @@ ggplot(vmt_weekly_w_person, aes(x=race)) + geom_bar() + ggtitle("Distribution of
   xlab("Race") + ylab("Count") + theme(axis.text.x=element_text(size=6, angle = 20)) + 
   geom_text(stat='count', aes(label=..count..), vjust=-0.2)
 
+ggplot(vmt_weekly_w_person, aes(x=ethnicity)) + geom_bar() + ggtitle("Distribution of Ethnicities") +
+  xlab("Ethnicity") + ylab("Count") + theme(axis.text.x=element_text(size=6, angle = 20)) + 
+  geom_text(stat='count', aes(label=..count..), vjust=-0.2)
+
 ggplot(vmt_weekly_w_person, aes(x=education)) + geom_bar() + ggtitle("Distribution of Education") +
   xlab("Education") + ylab("Count") + theme(axis.text.x=element_text(size=6, angle = 20)) + 
   geom_text(stat='count', aes(label=..count..), vjust=-0.2)
@@ -490,9 +491,15 @@ vmt_weekly_w_person$age_group <- factor(vmt_weekly_w_person$age_group,
                                         levels = c("18 to 34", "35 to 54", "55 or older"))
 
 ## Race
-vmt_weekly_w_person$race <- ifelse(vmt_weekly_w_person$race == "White", "White", "nonWhite")
+vmt_weekly_w_person$race <- ifelse(vmt_weekly_w_person$race == "White" & vmt_weekly_w_person$ethnicity == "Not Hispanic or Latino", "White", "nonWhite")
 vmt_weekly_w_person$race <- factor(vmt_weekly_w_person$race, 
                                    levels = unique(vmt_weekly_w_person$race))
+vmt_weekly_w_person <- vmt_weekly_w_person %>%
+  select(-ethnicity)
+
+ggplot(vmt_weekly_w_person, aes(x=race)) + geom_bar() + ggtitle("Distribution of Racial Groups (Accounting for Ethnicity)") +
+  xlab("Race") + ylab("Count") + theme(axis.text.x=element_text(size=6, angle = 20)) + 
+  geom_text(stat='count', aes(label=..count..), vjust=-0.2)
 
 ## Gender
 unique(vmt_weekly_w_person$gender)
@@ -513,7 +520,11 @@ vmt_weekly_w_person$education <- relevel(vmt_weekly_w_person$education, ref = "b
 ## Join on household variables that are relevant to VMT -----------------------
 hh_keep <- household_all %>%
   select(survey_year, hh_id, home_bg_2010, income_detailed, num_kids, num_adults,
-         num_workers, num_vehicles) 
+         num_workers, num_vehicles, num_workers) 
+
+hh_keep$num_workers <- as.numeric(gsub("[^0-9.]", "", hh_keep$num_workers))
+hh_keep$vehicles_numeric <- as.numeric(gsub("[^0-9.]", "", hh_keep$num_vehicles))
+
 
 vmt_weekly_w_hh <- vmt_weekly_w_person %>%
   left_join(hh_keep)
@@ -544,9 +555,6 @@ vmt_weekly_w_hh$num_kids <- as.numeric(substr(vmt_weekly_w_hh$num_kids, 1, 2))
 vmt_weekly_w_hh$num_adults <- as.numeric(substr(vmt_weekly_w_hh$num_adults, 1, 2))
 vmt_weekly_w_hh$num_vehicles <- as.numeric(substr(vmt_weekly_w_hh$num_vehicles, 1, 2))
 
-## Quick summary
-stargazer(vmt_weekly_w_hh)
-
 ## Create variable for number of additional teleworkers in household
 vmt_weekly_w_hh$hybrid_or_remote <- ifelse(vmt_weekly_w_hh$work_arr %in% c("Always Remote", "Hybrid"), 1, 0)
 vmt_weekly_w_hh <- vmt_weekly_w_hh %>%
@@ -572,39 +580,50 @@ vmt_weekly_w_hh <- vmt_weekly_w_hh %>%
                                      income_detailed %in% c("$200-$250K", "$250K+") ~ "$200K+",
                                      income_detailed %in% c("Undisclosed") ~ "Undisclosed"))
 
+## Create auto sufficency variable
+vmt_weekly_w_hh <- vmt_weekly_w_hh %>%
+  mutate(auto_sufficiency = case_when(
+    vehicles_numeric == 0 ~ 0,
+    vehicles_numeric < num_workers ~ 1,
+    .default = 2
+  ))
+
+vmt_weekly_w_hh$auto_sufficiency <- as.factor(vmt_weekly_w_hh$auto_sufficiency)
+
+
 ## Join on Built Environment Variables -------------------------------------
 sld2018 <- sld2018 %>%
-  select(bg2010, jobs_per_hh, emp8_ent, intersection_den)
+  select(bg2010, jobs_per_hh, emp8_ent, res_den, intersection_den)
 
 vmt_weekly_w_be <- vmt_weekly_w_hh %>%
   left_join(sld2018, by = c("home_bg_2010" = "bg2010"))
 
 vmt_weekly_w_be$home_bg_2010 <- as.character(vmt_weekly_w_be$home_bg_2010)
 
-vmt_weekly_w_be <- vmt_weekly_w_be %>%
-  left_join(transit2021)
+# vmt_weekly_w_be <- vmt_weekly_w_be %>%
+#   left_join(transit2021)
 
-# Get the home BG where transit jobs is NA, fill with previous years' values
-na_home_bg <- vmt_weekly_w_be[is.na(vmt_weekly_w_be$transit_jobs30), ]$home_bg_2010
-# # See if it's in the dataset
-vmt_weekly_w_be %>%
-  filter(home_bg_2010 %in% na_home_bg) %>%
-  select(transit_jobs30, survey_year, home_bg_2010)
+# # Get the home BG where transit jobs is NA, fill with previous years' values
+# na_home_bg <- vmt_weekly_w_be[is.na(vmt_weekly_w_be$transit_jobs30), ]$home_bg_2010
+# # # See if it's in the dataset
+# vmt_weekly_w_be %>%
+#   filter(home_bg_2010 %in% na_home_bg) %>%
+#   select(transit_jobs30, survey_year, home_bg_2010)
 
-wi_transit <- wi_transit2021_load %>%
-  filter(geoid %in% c(550939604002, 550939607002),
-         threshold == 1800) %>%
-  select(geoid, weighted_average) %>%
-  mutate(geoid = as.character(geoid))
+# wi_transit <- wi_transit2021_load %>%
+#   filter(geoid %in% c(550939604002, 550939607002),
+#          threshold == 1800) %>%
+#   select(geoid, weighted_average) %>%
+#   mutate(geoid = as.character(geoid))
+# 
+# vmt_weekly_w_be <- vmt_weekly_w_be %>%
+#   left_join(wi_transit, by = c("home_bg_2010" = "geoid"))
+# 
+# vmt_weekly_w_be$transit_jobs30 <- ifelse(is.na(vmt_weekly_w_be$transit_jobs30),
+#                                          vmt_weekly_w_be$weighted_average, vmt_weekly_w_be$transit_jobs30)
 
-vmt_weekly_w_be <- vmt_weekly_w_be %>%
-  left_join(wi_transit, by = c("home_bg_2010" = "geoid"))
-
-vmt_weekly_w_be$transit_jobs30 <- ifelse(is.na(vmt_weekly_w_be$transit_jobs30),
-                                         vmt_weekly_w_be$weighted_average, vmt_weekly_w_be$transit_jobs30)
-
-vmt_weekly_w_be <- vmt_weekly_w_be %>%
-  select(-weighted_average)
+# vmt_weekly_w_be <- vmt_weekly_w_be %>%
+#   select(-weighted_average)
 
 ## Join on Economic Variables ----------------------------------------------
 ## Gas prices
@@ -640,68 +659,68 @@ vmt_weekly_for_model$work_cbg_2010 <- as.character(vmt_weekly_for_model$work_cbg
 
 ## Get distance between home and work --------------------------------------
 ## Get OD pairs for always in-person and hybrid
-od_pairs <- vmt_weekly_for_model %>%
-  filter(work_arr %in% c("Always In-Person", "Hybrid")) %>%
-  select(person_id, home_bg_2010, work_cbg_2010) %>%
-  drop_na()
-
-od_pairs <- od_pairs[, -1]
-
-## Get centroids of CBGs
-mn_bgs <- block_groups(state = "MN", year = 2010)
-mn_bgs_centroids <- st_centroid(mn_bgs) %>%
-  select(GEOID10, geometry) %>%
-  rename(bg2010 = GEOID10, geom = geometry)
-
-
-wi_bgs <- block_groups(state = "WI", year = 2010)
-wi_bgs_centroids <- st_centroid(wi_bgs) %>%
-  select(GEOID10, geometry) %>%
-  rename(bg2010 = GEOID10, geom = geometry)
-
-bgs_centroids <- rbind(mn_bgs_centroids, wi_bgs_centroids)
-
-od_pairs <- od_pairs %>%
-  left_join(bgs_centroids, c("home_bg_2010" = "bg2010")) 
-
-colnames(od_pairs)[4] <- "home_geom"
-
-od_pairs <- od_pairs %>%
-  left_join(bgs_centroids, c("work_cbg_2010" = "bg2010")) 
-
-colnames(od_pairs)[5] <- "work_geom"
-
-origins <- as.data.frame(st_coordinates(od_pairs$home_geom))
-destinations <- as.data.frame(st_coordinates(od_pairs$work_geom))
-
-# Get travel time (and distance)
-travel_times_list <- list()
-for(i in 1:nrow(origins)) {
-  src_point <- c(origins$X[i], origins$Y[i])
-  dst_point <- c(destinations$X[i], destinations$Y[i])
-  
-  # Call osrmRoute for each pair
-  route <- osrmRoute(
-    src = src_point, 
-    dst = dst_point, 
-    overview = "simplified" # Get simplified geometry
-  )
-  
-  # Store the result in the list, potentially adding an identifier
-  route$person_id <- od_pairs$person_id[i]
-  travel_times_list[[i]] <- route
-}
-
-# Combine all routes into a single sf data frame
-travel_times_df <- do.call(rbind, travel_times_list)
-travel_times_df <- travel_times_df %>%
-  select(person_id, duration, distance) %>%
-  rename(miles_to_work = distance,
-         minutes_to_work = duration)
-  
-row.names(travel_times_df) <- NULL
-travel_times_df <- travel_times_df %>%
-  st_drop_geometry()
+# od_pairs <- vmt_weekly_for_model %>%
+#   filter(work_arr %in% c("Always In-Person", "Hybrid")) %>%
+#   select(person_id, home_bg_2010, work_cbg_2010) %>%
+#   drop_na()
+# 
+# od_pairs <- od_pairs[, -1]
+# 
+# ## Get centroids of CBGs
+# mn_bgs <- block_groups(state = "MN", year = 2010)
+# mn_bgs_centroids <- st_centroid(mn_bgs) %>%
+#   select(GEOID10, geometry) %>%
+#   rename(bg2010 = GEOID10, geom = geometry)
+# 
+# 
+# wi_bgs <- block_groups(state = "WI", year = 2010)
+# wi_bgs_centroids <- st_centroid(wi_bgs) %>%
+#   select(GEOID10, geometry) %>%
+#   rename(bg2010 = GEOID10, geom = geometry)
+# 
+# bgs_centroids <- rbind(mn_bgs_centroids, wi_bgs_centroids)
+# 
+# od_pairs <- od_pairs %>%
+#   left_join(bgs_centroids, c("home_bg_2010" = "bg2010")) 
+# 
+# colnames(od_pairs)[4] <- "home_geom"
+# 
+# od_pairs <- od_pairs %>%
+#   left_join(bgs_centroids, c("work_cbg_2010" = "bg2010")) 
+# 
+# colnames(od_pairs)[5] <- "work_geom"
+# 
+# origins <- as.data.frame(st_coordinates(od_pairs$home_geom))
+# destinations <- as.data.frame(st_coordinates(od_pairs$work_geom))
+# 
+# # Get travel time (and distance)
+# travel_times_list <- list()
+# for(i in 1:nrow(origins)) {
+#   src_point <- c(origins$X[i], origins$Y[i])
+#   dst_point <- c(destinations$X[i], destinations$Y[i])
+#   
+#   # Call osrmRoute for each pair
+#   route <- osrmRoute(
+#     src = src_point, 
+#     dst = dst_point, 
+#     overview = "simplified" # Get simplified geometry
+#   )
+#   
+#   # Store the result in the list, potentially adding an identifier
+#   route$person_id <- od_pairs$person_id[i]
+#   travel_times_list[[i]] <- route
+# }
+# 
+# # Combine all routes into a single sf data frame
+# travel_times_df <- do.call(rbind, travel_times_list)
+# travel_times_df <- travel_times_df %>%
+#   select(person_id, duration, distance) %>%
+#   rename(miles_to_work = distance,
+#          minutes_to_work = duration)
+#   
+# row.names(travel_times_df) <- NULL
+# travel_times_df <- travel_times_df %>%
+#   st_drop_geometry()
 
 ## Log VMT ----------------------------------------------------------------
 vmt_weekly_for_model$ln_vmt_weekly <- log(vmt_weekly_for_model$vmt_weekly + 1)
@@ -710,8 +729,10 @@ vmt_weekly_for_model$ln_nonwork_tour_vmt_weekly <- log(vmt_weekly_for_model$nonw
 
 
 # Log BE variables --------------------------------------------------------
-vmt_weekly_for_model$ln_jobs_per_hh <- log(vmt_weekly_model_mat$jobs_per_hh + 1)
-vmt_weekly_for_model$ln_intersection_den <- log(vmt_weekly_model_mat$intersection_den)
+vmt_weekly_for_model$ln_jobs_per_hh <- log(vmt_weekly_for_model$jobs_per_hh + 1)
+vmt_weekly_for_model$ln_intersection_den <- log(vmt_weekly_for_model$intersection_den)
+vmt_weekly_for_model$ln_res_den <- log(vmt_weekly_for_model$res_den + 1)
+
 
 
 ## Relevel variables -------------------------------------------------------
@@ -721,11 +742,13 @@ vmt_weekly_for_model$income_detailed <- factor(vmt_weekly_for_model$income_detai
 vmt_weekly_for_model$income_detailed <- relevel(vmt_weekly_for_model$income_detailed, ref = "$50-$100K")
 
 ## Join on travel times ----------------------------------------------------
-vmt_weekly_df <- vmt_weekly_for_model %>%
-  left_join(travel_times_df) %>%
-  relocate(person_id, work_arr, person_weight, survey_year, vmt_weekly, 
-           work_tour_vmt_weekly, nonwork_tour_vmt_weekly,
-           ln_vmt_weekly, ln_work_tour_vmt_weekly, ln_nonwork_tour_vmt_weekly)
+# vmt_weekly_df <- vmt_weekly_for_model %>%
+#   left_join(travel_times_df) %>%
+#   relocate(person_id, work_arr, person_weight, survey_year, vmt_weekly, 
+#            work_tour_vmt_weekly, nonwork_tour_vmt_weekly,
+#            ln_vmt_weekly, ln_work_tour_vmt_weekly, ln_nonwork_tour_vmt_weekly)
+
+vmt_weekly_df <- vmt_weekly_for_model
 
 ## Write out VMT weekly ---------------------------------------------------
 write.csv(vmt_weekly_df, "./outputs/vmt_weekly_df.csv", row.names = F)
@@ -733,13 +756,12 @@ write.csv(vmt_weekly_df, "./outputs/vmt_weekly_df.csv", row.names = F)
 
 # VMT weekly model matrix (for OPSR) ----------------------------------------
 vmt_weekly_convert <- vmt_weekly_df %>%
-  select(person_id, person_weight, remote_day_factor, minutes_to_work, 
-         miles_to_work, remote_day_pct_factor, age_group, gender, employment, 
-         education, race, income_detailed, num_kids, num_vehicles) 
+  select(person_id, person_weight, remote_day_factor, remote_day_pct_factor, age_group, gender, employment, 
+         education, race, income_detailed, num_kids, num_vehicles, auto_sufficiency) 
 
 vmt_weekly_convert <- vmt_weekly_convert[, - 1]
 vmt_weekly_model_mat_step1 <- model.matrix(~ person_id + person_weight + remote_day_factor + remote_day_pct_factor + age_group + gender + employment + education + 
-                                             race + income_detailed + num_kids + num_vehicles, data = vmt_weekly_convert)
+                                             race + income_detailed + num_kids + num_vehicles + auto_sufficiency, data = vmt_weekly_convert)
 vmt_weekly_model_mat_step1 <- vmt_weekly_model_mat_step1[, -1]
 colnames(vmt_weekly_model_mat_step1) <- c("person_id", "person_weight", "remote_day1", "remote_day2",
                                           "remote_day3", "remote_day4", "remote_day5plus","remote_pct20to40",
@@ -748,7 +770,7 @@ colnames(vmt_weekly_model_mat_step1) <- c("person_id", "person_weight", "remote_
                                           "employed_part_time", "self_employed", "no_bach_plus", "nonWhite", 
                                           "hh_income_under50", "hh_income100to150", "hh_income150to200", 
                                           "hh_income_200plus", "hh_income_undisclosed", "kids_1plus", "vehicle1",
-                                          "vehicle2plus")
+                                          "vehicle2plus", "auto_suf1", "auto_suf2")
 
 vmt_weekly_model_mat_step2 <-  vmt_weekly_df %>%
   select(-age_group, -gender, -employment, -education, -race, -income_detailed, 
@@ -762,9 +784,9 @@ vmt_weekly_model_mat$work_arr <- ifelse(vmt_weekly_model_mat$work_arr == "Always
 
 vmt_weekly_model_mat <- vmt_weekly_model_mat[, !(names(vmt_weekly_model_mat) %in% c("hh_id", "num_workers"))]
 
-vmt_weekly_model_mat <- vmt_weekly_model_mat %>%
-  mutate(miles_to_work = if_else(is.na(miles_to_work), 0, miles_to_work),
-         minutes_to_work = if_else(is.na(minutes_to_work), 0, minutes_to_work))
+# vmt_weekly_model_mat <- vmt_weekly_model_mat %>%
+#   mutate(miles_to_work = if_else(is.na(miles_to_work), 0, miles_to_work),
+#          minutes_to_work = if_else(is.na(minutes_to_work), 0, minutes_to_work))
 
 ## Write out weekly model matrix for OPSR --------------------------------
 write.csv(vmt_weekly_model_mat, "./outputs/vmt_weekly_model_mat.csv", row.names = F)
@@ -804,7 +826,7 @@ vmt_daily_model_mat_step1 <- model.matrix(~ person_id + person_weight +
                                             travel_dow + age_group + gender + 
                                             employment + education + race + 
                                             income_detailed + num_kids + 
-                                            num_vehicles + day_num, data = vmt_daily_df)
+                                            num_vehicles + day_num + vehicles_numeric + num_workers, data = vmt_daily_df)
 vmt_daily_model_mat_step1 <- vmt_daily_model_mat_step1[, -1]
 
 colnames(vmt_daily_model_mat_step1) <- c("person_id", "person_weight", "monday", 
@@ -874,7 +896,7 @@ vmt_displacement_step2 <- vmt_displacement_all %>%
          nonwork_tour_vmt_daily_weekends = nonwork_tour_vmt_daily * weekend) %>%
   ungroup() %>%
   group_by(person_id) %>%
-  summarize(nonwork_tour_vmt_weekly_weekdays = sum(nonwork_tour_vmt_daily_weekdays),
+  dplyr::summarize(nonwork_tour_vmt_weekly_weekdays = sum(nonwork_tour_vmt_daily_weekdays),
             nonwork_tour_vmt_weekly_weekends = sum(nonwork_tour_vmt_daily_weekends))
 
 vmt_displacement <- vmt_displacement_all %>%
