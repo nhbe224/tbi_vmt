@@ -127,6 +127,7 @@ linkedtrip_combined$vehicle_trips = linkedtrip_combined$vehicle_trip_flag / link
 # Calculate VMT
 linkedtrip_combined$vmt = linkedtrip_combined$vehicle_trips * linkedtrip_combined$distance_miles
 unique(linkedtrip_combined$survey_year)
+
 ## Exclusions -------------------------------------------------------------
 ## First, exclude trips with missing block groups and timestamp
 print(paste0('Trips before exclusions: ', nrow(linkedtrip_combined), ", VMT before exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
@@ -157,7 +158,7 @@ linkedtrip_combined <- linkedtrip_combined %>%
 
 print(paste0('Trips after exclusions: ', nrow(linkedtrip_combined), ", VMT after exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
 
-## Then, remove incosistent modes.
+## Then, remove inconsistent modes.
 print(paste0('Trips before exclusions: ', nrow(linkedtrip_combined), ", VMT before exclusion: ", round(sum(linkedtrip_combined$vmt, na.rm = T))))
 
 linkedtrip_combined <- linkedtrip_combined %>%
@@ -344,6 +345,7 @@ commute_vmt <- vmt_by_work_arr %>%
 
 commute_vmt$day_num <- as.numeric(str_remove(commute_vmt$day_num, "Day "))
 
+## Tour ID. Start with 1 if it's a new person or new day.
 commute_vmt <- commute_vmt %>%
   mutate(tour_id_count = if_else((person_id != lag(person_id)) | (day_num != lag(day_num)), 1, if_else((o_purpose_category %in% c('Home', 'Overnight')), 1, 0), missing = 1)) %>%
   relocate(person_id, day_num, tour_id_count)
@@ -354,10 +356,12 @@ commute_vmt <- commute_vmt %>%
   relocate(person_id, day_num, tour_id) %>%
   select(-tour_id_count)
 
+## A work trip if the origin or destination is work/work-related.
 commute_vmt$work_trip = ifelse(commute_vmt$o_purpose_category %in% c("Work", "Work related") | commute_vmt$d_purpose_category %in% c("Work", "Work related"), 1, 0)
 commute_vmt <- commute_vmt %>%
   relocate(person_id, day_num, tour_id, work_trip)
 
+## See if this is a work tour
 commute_vmt <- commute_vmt %>%
   group_by(person_id, day_num, tour_id) %>%
   mutate(work_tour = max(work_trip)) %>%
@@ -589,6 +593,7 @@ vmt_weekly_w_hh <- vmt_weekly_w_hh %>%
   ))
 
 vmt_weekly_w_hh$auto_sufficiency <- as.factor(vmt_weekly_w_hh$auto_sufficiency)
+vmt_weekly_w_hh$auto_sufficiency <- relevel(vmt_weekly_w_hh$auto_sufficiency, ref = 2)
 
 
 ## Join on Built Environment Variables -------------------------------------
@@ -734,6 +739,10 @@ vmt_weekly_for_model$ln_intersection_den <- log(vmt_weekly_for_model$intersectio
 vmt_weekly_for_model$ln_res_den <- log(vmt_weekly_for_model$res_den + 1)
 
 
+# Add post-covid variable -------------------------------------------------
+vmt_weekly_for_model$post_covid = ifelse(vmt_weekly_for_model$survey_year %in% c(2021, 2023), 1, 0)
+
+
 
 ## Relevel variables -------------------------------------------------------
 vmt_weekly_for_model$age_group <- relevel(vmt_weekly_for_model$age_group, ref = "35 to 54")
@@ -770,7 +779,7 @@ colnames(vmt_weekly_model_mat_step1) <- c("person_id", "person_weight", "remote_
                                           "employed_part_time", "self_employed", "no_bach_plus", "nonWhite", 
                                           "hh_income_under50", "hh_income100to150", "hh_income150to200", 
                                           "hh_income_200plus", "hh_income_undisclosed", "kids_1plus", "vehicle1",
-                                          "vehicle2plus", "auto_suf1", "auto_suf2")
+                                          "vehicle2plus", "auto_suf0", "auto_suf2")
 
 vmt_weekly_model_mat_step2 <-  vmt_weekly_df %>%
   select(-age_group, -gender, -employment, -education, -race, -income_detailed, 
@@ -787,6 +796,9 @@ vmt_weekly_model_mat <- vmt_weekly_model_mat[, !(names(vmt_weekly_model_mat) %in
 # vmt_weekly_model_mat <- vmt_weekly_model_mat %>%
 #   mutate(miles_to_work = if_else(is.na(miles_to_work), 0, miles_to_work),
 #          minutes_to_work = if_else(is.na(minutes_to_work), 0, minutes_to_work))
+
+vmt_weekly_model_mat <- vmt_weekly_model_mat %>%
+  mutate(nonmale_kids_1plus = ifelse(male == 0 & kids_1plus == 1, 1, 0))
 
 ## Write out weekly model matrix for OPSR --------------------------------
 write.csv(vmt_weekly_model_mat, "./outputs/vmt_weekly_model_mat.csv", row.names = F)
@@ -826,7 +838,7 @@ vmt_daily_model_mat_step1 <- model.matrix(~ person_id + person_weight +
                                             travel_dow + age_group + gender + 
                                             employment + education + race + 
                                             income_detailed + num_kids + 
-                                            num_vehicles + day_num + vehicles_numeric + num_workers, data = vmt_daily_df)
+                                            num_vehicles + day_num + auto_sufficiency, data = vmt_daily_df)
 vmt_daily_model_mat_step1 <- vmt_daily_model_mat_step1[, -1]
 
 colnames(vmt_daily_model_mat_step1) <- c("person_id", "person_weight", "monday", 
@@ -838,11 +850,12 @@ colnames(vmt_daily_model_mat_step1) <- c("person_id", "person_weight", "monday",
                                          "hh_income_under50", "hh_income100to150", 
                                          "hh_income150to200", "hh_income_200plus", 
                                          "hh_income_undisclosed", "kids_1plus", 
-                                         "vehicle1","vehicle2plus", "day_num")
+                                         "vehicle1","vehicle2plus", "day_num", 
+                                         "auto_sufo", "auto_suf2")
 
 vmt_daily_model_mat_step2 <-  vmt_daily_df %>%
   select(-age_group, -travel_dow, -gender, -employment, -education, -race, 
-         -income_detailed, -num_kids, -num_vehicles)
+         -income_detailed, -num_kids, -num_vehicles, -auto_sufficiency)
 
 vmt_daily_model_mat <- vmt_daily_model_mat_step2 %>%
   inner_join(vmt_daily_model_mat_step1, by = c("person_id", "person_weight", "day_num"), copy = T)
@@ -850,7 +863,7 @@ vmt_daily_model_mat <- vmt_daily_model_mat_step2 %>%
 vmt_daily_model_mat$work_arr <- ifelse(vmt_daily_model_mat$work_arr == "Always In-Person", 1,
                                        ifelse(vmt_daily_model_mat$work_arr == "Hybrid", 2, 3))
 
-vmt_daily_model_mat <- vmt_daily_model_mat[, !(names(vmt_daily_model_mat) %in% c("hh_id", "num_workers"))]
+vmt_daily_model_mat <- vmt_daily_model_mat[, !(names(vmt_daily_model_mat) %in% c("hh_id"))]
 
 vmt_daily_model_mat$work_arr_day <- ifelse(vmt_daily_model_mat$work_arr_day == "in_person_day", 1,
                                        ifelse(vmt_daily_model_mat$work_arr_day == "remote_day", 2, 3))
@@ -953,7 +966,7 @@ vmt_displacement_mat_step1 <- model.matrix(~ person_id + person_weight +
                                             travel_dow + age_group + gender + 
                                             employment + education + race + 
                                             income_detailed + num_kids + 
-                                            num_vehicles + day_num, data = vmt_displacement)
+                                            num_vehicles + day_num + auto_sufficiency, data = vmt_displacement)
 vmt_displacement_mat_step1 <- vmt_displacement_mat_step1[, -1]
 
 colnames(vmt_displacement_mat_step1) <- c("person_id", "person_weight", "sunday", "monday", 
@@ -965,7 +978,7 @@ colnames(vmt_displacement_mat_step1) <- c("person_id", "person_weight", "sunday"
                                          "hh_income_under50", "hh_income100to150", 
                                          "hh_income150to200", "hh_income_200plus", 
                                          "hh_income_undisclosed", "kids_1plus", 
-                                         "vehicle1","vehicle2plus", "day_num")
+                                         "vehicle1","vehicle2plus", "day_num", "auto_suf0", "auto_suf2")
 
 vmt_displacement_mat_step2 <-  vmt_displacement %>%
   select(-age_group, -travel_dow, -gender, -employment, -education, -race, 
@@ -977,7 +990,7 @@ vmt_displacement_mat <- vmt_displacement_mat_step2 %>%
 vmt_displacement_mat$work_arr <- ifelse(vmt_displacement_mat$work_arr == "Always In-Person", 1,
                                        ifelse(vmt_displacement_mat$work_arr == "Hybrid", 2, 3))
 
-vmt_displacement_mat <- vmt_displacement_mat[, !(names(vmt_displacement_mat) %in% c("hh_id", "num_workers"))]
+vmt_displacement_mat <- vmt_displacement_mat[, !(names(vmt_displacement_mat) %in% c("hh_id"))]
 
 vmt_displacement_mat$work_arr_day <- ifelse(vmt_displacement_mat$work_arr_day == "in_person_day", 1,
                                            ifelse(vmt_displacement_mat$work_arr_day == "remote_day", 2, 3))

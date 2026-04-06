@@ -34,7 +34,7 @@ ar_vmt_weekly_df <- vmt_weekly_df %>%
   filter(work_arr == "Always Remote")
 
 continuous_vars <- c("vmt_weekly", "work_tour_vmt_weekly", "nonwork_tour_vmt_weekly",
-                     "jobs_per_hh", "transit_jobs30", "intersection_den", "emp8_ent", 
+                     "res_den", "intersection_den", "emp8_ent", 
                      "num_hybrid_or_remote", "person_weight")
 
 aip_continuous <- aip_vmt_weekly_df[, continuous_vars]
@@ -68,6 +68,26 @@ stargazer(as.data.frame(aip_continuous), type = "latex", digits = 1)
 stargazer(as.data.frame(hybrid_continuous), type = "latex", digits = 1)
 stargazer(as.data.frame(ar_continuous), type = "latex", digits = 1)
 
+
+for(v in continuous_vars[-length(continuous_vars)]) {
+  # Calculate min and max for each arrangement
+  stats <- vmt_weekly_df %>%
+    group_by(work_arr) %>%
+    dplyr::summarize(
+      min_val = round(min(.data[[v]], na.rm = TRUE), 1),
+      max_val = round(max(.data[[v]], na.rm = TRUE), 1),
+      .groups = 'drop'
+    ) %>%
+    # Ensure all levels are present even if missing in data
+    complete(work_arr)
+  
+  # Format and print Minimums using & as separator
+  cat(paste0(v, ": ", paste(format(stats$min_val, nsmall = 1), collapse = " & "), "\n"))
+  
+  # Format and print Maximums using & as separator
+  cat(paste0(v, ": ", paste(format(stats$max_val, nsmall = 1), collapse = " & "), "\n"))
+}
+
 ## Categorical Variables ---------------------------------------------------
 vmt_weekly_df$age_group <- factor(vmt_weekly_df$age_group, c("18 to 34", "35 to 54", "55 or older"))
 vmt_weekly_df$income_detailed <- factor(vmt_weekly_df$income_detailed, 
@@ -76,7 +96,7 @@ vmt_weekly_df$income_detailed <- factor(vmt_weekly_df$income_detailed,
 
 categorical_vars <- vmt_weekly_df %>%
   select(work_arr, age_group, gender, employment, race, education, income_detailed, 
-         num_kids, num_vehicles, survey_year, person_weight)
+         num_kids, num_vehicles, survey_year, auto_sufficiency, person_weight)
 
 categorical_vars <- as.data.frame(categorical_vars[-1])
 
@@ -87,6 +107,8 @@ for(i in colnames(categorical_vars[c(-1, -length(colnames(categorical_vars)))]))
           dplyr::summarize(count = n()) %>%
           mutate(pct = count / sum(count)))
 }
+
+vmt_weekly_df$auto_sufficiency <- factor(vmt_weekly_df$auto_sufficiency)
 
 for(i in colnames(categorical_vars[c(-1, -length(colnames(categorical_vars)))])){
   print(categorical_vars %>%
