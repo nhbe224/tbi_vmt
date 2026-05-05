@@ -20,53 +20,146 @@ vmt_weekly_model_mat <- vmt_files[["vmt_weekly_model_mat"]]
 vmt_daily_model_mat <- vmt_files[["vmt_daily_model_mat"]]
 vmt_displacement <- vmt_files[["vmt_displacement"]]
 work_arr_by_region_load <- read.csv("./work_arr_by_region.csv")
-
+us_vmt_per_capita <- read.csv("../inputs/us_vmt_per_capita.csv") %>%
+  filter(!is.na(year))
 
 # Summary Tables ----------------------------------------------------------
 ## Continuous Variables ---------------------------------------------------
-aip_vmt_weekly_df <- vmt_weekly_df %>%
-  filter(work_arr == "Always In-Person")
+get_continuous_stats <- function(data) {
+  data %>%
+    # Pivot variables so we can calculate stats for all 4 at once
+    pivot_longer(cols = c(vmt_weekly, work_tour_vmt_weekly, nonwork_tour_vmt_weekly,
+                          res_den, intersection_den,
+                          num_adults), 
+                 names_to = "variable", 
+                 values_to = "value") %>%
+    # Group by Year, Variable, and State
+    group_by(variable, work_arr) %>%
+    dplyr::summarize(
+      n = n(),
+      w_mean = weighted.mean(value, person_weight, na.rm = TRUE),
+      # Using sqrt of weighted variance for SD
+      w_sd = sqrt(wtd.var(value, person_weight, na.rm = TRUE)),
+      min_val = min(value, na.rm = TRUE),
+      max_val = max(value, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    # Arrange by state to ensure the "State 1 & State 2" order is consistent
+    arrange( variable, work_arr) %>%
+    # Group by year and variable to collapse the states into one string
+    group_by(variable) %>%
+    dplyr::summarize(
+      N = paste(n, collapse = " & "),
+      Weighted_Mean = paste(round(w_mean, 2), collapse = " & "),
+      Weighted_SD = paste(round(w_sd, 2), collapse = " & "),
+      Min = paste(round(min_val, 1), collapse = " & "),
+      Max = paste(round(max_val, 1), collapse = " & "),
+      .groups = "drop"
+    )
+}
 
-hybrid_vmt_weekly_df <- vmt_weekly_df %>%
-  filter(work_arr == "Hybrid")
-
-ar_vmt_weekly_df <- vmt_weekly_df %>%
-  filter(work_arr == "Always Remote")
-
-continuous_vars <- c("vmt_weekly", "work_tour_vmt_weekly", "nonwork_tour_vmt_weekly",
-                     "res_den", "intersection_den", "emp8_ent", 
-                     "num_hybrid_or_remote", "person_weight")
-
-aip_continuous <- aip_vmt_weekly_df[, continuous_vars]
-hybrid_continuous <- hybrid_vmt_weekly_df[, continuous_vars]
-ar_continuous <- ar_vmt_weekly_df[, continuous_vars]
-
-aip_w_means <- sapply(aip_continuous[continuous_vars[-length(continuous_vars)]], 
-                      function(x) weighted.mean(x, w = aip_continuous$person_weight))
-hybrid_w_means <- sapply(hybrid_continuous[continuous_vars[-length(continuous_vars)]], 
-                      function(x) weighted.mean(x, w = hybrid_continuous$person_weight))
-ar_w_means <- sapply(ar_continuous[continuous_vars[-length(continuous_vars)]], 
-                      function(x) weighted.mean(x, w = ar_continuous$person_weight))
-
-print(aip_w_means)
-print(hybrid_w_means)
-print(ar_w_means)
+continuous_vars_stats <- get_continuous_stats(vmt_weekly_df)
 
 
-aip_w_sd <- sapply(aip_continuous[continuous_vars[-length(continuous_vars)]], 
-                      function(x) sqrt(wtd.var(x, w = aip_continuous$person_weight)))
-hybrid_w_sd <- sapply(hybrid_continuous[continuous_vars[-length(continuous_vars)]], 
-                         function(x) sqrt(wtd.var(x, w = hybrid_continuous$person_weight)))
-ar_w_sd <- sapply(ar_continuous[continuous_vars[-length(continuous_vars)]], 
-                     function(x) sqrt(wtd.var(x, w = ar_continuous$person_weight)))
+vmt_weekly_df <- vmt_weekly_df %>%
+  mutate(vehicles_per_adult = case_when(vehicles_numeric / num_adults == 0 ~ "Zero vehicles",
+                                        vehicles_numeric / num_adults > 0 & vehicles_numeric / num_adults < 1 ~ "LT 1 veh per adult",
+                                        vehicles_numeric / num_adults >=  1 ~ "GE 1 veh per adult") )
 
-print(aip_w_sd)
-print(hybrid_w_sd)
-print(ar_w_sd)
+## Categorical Variables ---------------------------------------------
+get_categorical_summary <- function(data) {
+  result <- data %>%
+    # 1. Reshape to long format to handle all variables at once
+    pivot_longer(cols = c(employment, age_group, gender, race, education, income_detailed, 
+                          num_kids, vehicles_per_adult), 
+                 names_to = "var_name", 
+                 values_to = "level") %>%
+    
+    # 2. Calculate counts and weighted sums per category per state/year
+    group_by(work_arr, var_name, level) %>%
+    summarise(
+      n = n(),
+      cat_weight_sum = sum(person_weight, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    
+    # 3. Calculate total weight per state/year for the percentage denominator
+    group_by(work_arr, var_name) %>%
+    mutate(
+      total_state_weight = sum(cat_weight_sum, na.rm = TRUE)
+    ) %>%
+    ungroup() %>%
+    
+    # 4. Create the "count (pct\%)" string for each state
+    mutate(
+      pct = (cat_weight_sum / total_state_weight * 100),
+      # Formatting the combined string: "10 (25.5\%)"
+      combined_val = paste0(n, " (", round(pct), "\\%)"),
+      variable = paste0(var_name, ": ", level)
+    ) %>%
+    
+    # 5. Ensure states are sorted alphabetically for a consistent order in the ampersand list
+    arrange(variable, work_arr) %>%
+    
+    # 6. Final aggregation to join state values with ' & '
+    group_by( variable) %>%
+    summarise(
+      count_pct = paste(combined_val, collapse = " & "),
+      .groups = "drop"
+    )
+  return(result)
+}
 
-stargazer(as.data.frame(aip_continuous), type = "latex", digits = 1)
-stargazer(as.data.frame(hybrid_continuous), type = "latex", digits = 1)
-stargazer(as.data.frame(ar_continuous), type = "latex", digits = 1)
+categorical_vars_stats <- get_categorical_summary(vmt_weekly_df) %>%
+  arrange(variable)
+
+
+
+##########################
+
+
+for(i in c(2019, 2021, 2023)){
+  aip_continuous <- aip_vmt_weekly_df[aip_vmt_weekly_df$survey_year == i, continuous_vars]
+  hybrid_continuous <- hybrid_vmt_weekly_df[hybrid_vmt_weekly_df$survey_year == i, continuous_vars]
+  ar_continuous <- ar_vmt_weekly_df[ar_vmt_weekly_df$survey_year == i, continuous_vars]
+  
+  aip_w_means <- sapply(aip_continuous[continuous_vars[-length(continuous_vars)]], 
+                        function(x) weighted.mean(x, w = aip_continuous$person_weight))
+  hybrid_w_means <- sapply(hybrid_continuous[continuous_vars[-length(continuous_vars)]], 
+                           function(x) weighted.mean(x, w = hybrid_continuous$person_weight))
+  ar_w_means <- sapply(ar_continuous[continuous_vars[-length(continuous_vars)]], 
+                       function(x) weighted.mean(x, w = ar_continuous$person_weight))
+  print(paste0("Year:", i))
+  print(paste0("Always In Person Means:", i))
+  print(aip_w_means)
+  print(paste0("Hybrid Means:", i))
+  print(hybrid_w_means)
+  print(paste0("Always Remote Means:", i))
+  print(ar_w_means)
+  
+  
+  aip_w_sd <- sapply(aip_continuous[continuous_vars[-length(continuous_vars)]], 
+                     function(x) sqrt(wtd.var(x, w = aip_continuous$person_weight)))
+  hybrid_w_sd <- sapply(hybrid_continuous[continuous_vars[-length(continuous_vars)]], 
+                        function(x) sqrt(wtd.var(x, w = hybrid_continuous$person_weight)))
+  ar_w_sd <- sapply(ar_continuous[continuous_vars[-length(continuous_vars)]], 
+                    function(x) sqrt(wtd.var(x, w = ar_continuous$person_weight)))
+  
+  print(paste0("Year:", i))
+  print(paste0("Always In Person SDs:", i))
+  print(aip_w_sd)
+  print(paste0("Hybrid SDs:", i))
+  print(hybrid_w_sd)
+  print(paste0("Always Remote SDs:", i))
+  print(ar_w_sd)
+  
+  stargazer(as.data.frame(aip_continuous), type = "text", digits = 1)
+  stargazer(as.data.frame(hybrid_continuous), type = "text", digits = 1)
+  stargazer(as.data.frame(ar_continuous), type = "text", digits = 1)
+  
+  
+}
+
 
 
 for(v in continuous_vars[-length(continuous_vars)]) {
@@ -157,7 +250,7 @@ work_arr_by_year_w <- vmt_weekly_df %>%
   ) %>%
   ungroup() %>%
   mutate(wtd_pct_text_step1 = paste0(round(wtd_pct, 0), "%"),
-         wtd_pct_text = ifelse(wtd_pct > 10, wtd_pct_text_step1, "")) %>%
+         wtd_pct_text = ifelse(wtd_pct >= 9, wtd_pct_text_step1, "")) %>%
   ungroup()
   
 
@@ -188,7 +281,7 @@ vmt_by_work_arr_vmt_type_w <- vmt_weekly_df %>%
   pivot_longer(cols = c(work_vmt_weekly_wtd_mean, nonwork_tour_vmt_weekly_wtd_mean),
                names_to = "vmt_type",
                values_to = "vmt") %>%
-  mutate(vmt_type = ifelse(vmt_type == "work_vmt_weekly_wtd_mean", "Work", "Non-Work"),
+  mutate(vmt_type = ifelse(vmt_type == "work_vmt_weekly_wtd_mean", "Work Tour", "Non-Work Tour"),
          vmt_label = ifelse(vmt > 10, round(vmt, 0), NA))
 
 ggplot(vmt_by_work_arr_vmt_type_w, aes(x = factor(survey_year), y = vmt, fill = vmt_type)) +
@@ -219,11 +312,11 @@ ggplot(vmt_by_work_arr_vmt_type_w, aes(x = factor(survey_year), y = vmt, fill = 
       face = "bold"   # Make the text bold
     )
   ) +
-  scale_fill_manual(values = c("Non-Work" = "goldenrod3",
-                               "Work" = "navyblue"))
+  scale_fill_manual(values = c("Non-Work Tour" = "goldenrod3",
+                               "Work Tour" = "navyblue"))
   
 
-ggsave("./outputs/vmt_by_work_arr_vmt_type_w.jpg", width = 10, height = 6, units = "in")
+ggsave("./outputs/vmt_by_work_arr_vmt_type_w.jpg", width = 6, height = 10, units = "in")
 
 
 # Plot 3: Work Arrangement by Region ------------------------------------------
@@ -256,6 +349,53 @@ ggplot(work_arr_by_region, aes(x = region_year, y = pct*100, fill = work_arr)) +
                                "Always Remote" = "darkorange1"))
 
 ggsave("./outputs/work_arr_by_region.jpg", width = 10, height = 6, units = "in")
+
+
+# Plot VMT Per Capita US --------------------------------------------------
+mn_baseline <- 10691
+mn_reduction <- 9195
+co_baseline <- 9302
+co_reduction <- 8651
+ca_baseline <- 8979
+ca_reduction <- 6734
+
+ggplot(us_vmt_per_capita, aes(x = year, y = vmt_per_capita)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point() +
+  labs(title = "United States VMT Per Capita by Year",
+       x = "Year",
+       y = "VMT Per Capita") +
+  # ## MN Baseline
+  # # Add the horizontal benchmark line
+  # annotate("point", x = 2019, y = mn_baseline, color = "firebrick", size = 4) +
+  # # Add the text label for the benchmark
+  # annotate("text",
+  #          x = 2010, # Places label at the start of the x-axis
+  #          y = mn_baseline - 20,
+  #          label = "2019 MN Baseline",
+  #          vjust = 0,      # Positions text slightly above the line
+  #          hjust = 0,         # Left-aligns text
+  #          color = "firebrick",
+  #          fontface = "bold",
+  #          size = 6) +
+  # ## MN Reduction
+  # annotate("point", x = 2019, y = mn_reduction, color = "blueviolet", size = 4) +
+  # annotate("text",
+  #          x = 2004, # Places label at the start of the x-axis
+  #          y = mn_reduction - 100,
+  #          label = "2040 MN Reduction Target (14%\ndecrease from 2019 baseline)",
+  #          vjust = -0.5,      # Positions text slightly above the line
+  #          hjust = 0,         # Left-aligns text
+  #          color = "blueviolet",
+  #          fontface = "bold",
+  #          size = 6) +
+  theme(axis.text = element_text(size = 14), axis.title = element_text(size = 17),
+                             plot.title = element_text(size = 20)) +
+  ylim(8500, 10750)
+
+ggsave("./outputs/us_vmt_per_capita.jpg", width = 7, height = 9, units = "in")
+
+  
 
 
 ## Plot Data ----------------------------------------------------------

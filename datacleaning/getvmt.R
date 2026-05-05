@@ -800,6 +800,18 @@ vmt_weekly_model_mat <- vmt_weekly_model_mat[, !(names(vmt_weekly_model_mat) %in
 vmt_weekly_model_mat <- vmt_weekly_model_mat %>%
   mutate(nonmale_kids_1plus = ifelse(male == 0 & kids_1plus == 1, 1, 0))
 
+vmt_weekly_model_mat <- vmt_weekly_model_mat %>%
+  mutate(nonmale = ifelse(male == 0, 1, 0),
+         year2019 = ifelse(survey_year == 2019, 1, 0),
+         nonmale_kids_1plus = ifelse(male == 0 & kids_1plus == 1, 1, 0),
+         male_kids_1plus = ifelse(male == 1 & kids_1plus == 1, 1, 0),
+         male_kids_0 = ifelse(male == 1 & kids_1plus == 0, 1, 0),
+         nonmale_kids_0 =ifelse(male == 0 & kids_1plus == 0, 1, 0),
+         cars_per_adult = vehicles_numeric / num_adults,
+         cars_0 = ifelse(cars_per_adult == 0, 1, 0),
+         cars_lt1_per_adult = ifelse(cars_per_adult > 0 & cars_per_adult < 1, 1, 0),
+         cars_ge1_per_adult = ifelse(cars_per_adult >= 1, 1, 0))
+
 ## Write out weekly model matrix for OPSR --------------------------------
 write.csv(vmt_weekly_model_mat, "./outputs/vmt_weekly_model_mat.csv", row.names = F)
 
